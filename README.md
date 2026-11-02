@@ -1,10 +1,17 @@
 # 3D Warehouse Visualizer (Demo)
 
-An interactive WebGL digital-twin prototype for exploring rack-level warehouse inventory in 3D and simulating automated dock-to-rack inbound material flow.
+[![Live 3D Warehouse Map](https://img.shields.io/badge/%F0%9F%9A%80_Live_Demo-3D_Warehouse_Map-0ea5e9?style=for-the-badge)](https://miaou360.github.io/3d-warehouse-visualizer/demo/index.html)
+[![Live Flow Simulator](https://img.shields.io/badge/%E2%96%B6_Live_Demo-Inbound_Flow_Simulator-10b981?style=for-the-badge)](https://miaou360.github.io/3d-warehouse-visualizer/demo/simulation.html)
+[![License: MIT](https://img.shields.io/badge/License-MIT-64748b?style=for-the-badge)](LICENSE)
+
+An interactive WebGL digital-twin prototype for exploring rack-level warehouse inventory in 3D and simulating automated dock-to-rack inbound material flow — **playable directly in your browser with zero installation**.
+
+- **Live 3D Warehouse Map**: https://miaou360.github.io/3d-warehouse-visualizer/demo/index.html
+- **Live 3D Inbound Flow Simulator**: https://miaou360.github.io/3d-warehouse-visualizer/demo/simulation.html
 
 > **100% Synthetic Data**: Every layout coordinate, zone, rack identifier, SKU, product model, supplier, and lot number in this repository is deterministically generated from a fixed random seed (`tools/generate_fake_data.py`). No real facility floorplans or operational records are included.
 
-![3D Warehouse Overview](docs/screenshots/overview_occupancy.png)
+[![3D Warehouse Overview — Click to Open Live Demo](docs/screenshots/overview_occupancy.png)](https://miaou360.github.io/3d-warehouse-visualizer/demo/index.html)
 
 ## Key Features
 
@@ -25,14 +32,15 @@ An interactive WebGL digital-twin prototype for exploring rack-level warehouse i
     2. **Aisle Buffer Transfer**: Autonomous forklift routing from scan station to high-bay aisle handoff.
     3. **High-Bay ASRS Put-Away**: Vertical lifter storage into any user-selected rack/bay/level compartment via an interactive bin matrix.
 
-![Aging Heatmap & Bay Inspector](docs/screenshots/heatmap_aging_detail.png)
+[![Aging Heatmap & Bay Inspector](docs/screenshots/heatmap_aging_detail.png)](https://miaou360.github.io/3d-warehouse-visualizer/demo/index.html)
 
-![Inbound Flow Simulator](docs/screenshots/flow_simulator.png)
+[![Inbound Flow Simulator](docs/screenshots/flow_simulator.png)](https://miaou360.github.io/3d-warehouse-visualizer/demo/simulation.html)
 
 ## Repository Structure
 
 ```text
 .
+├── index.html              # Root redirect to demo/index.html for GitHub Pages
 ├── demo/
 │   ├── index.html          # Main 3D warehouse inventory visualizer
 │   ├── simulation.html     # 3D automated inbound logistics simulator
@@ -52,7 +60,7 @@ An interactive WebGL digital-twin prototype for exploring rack-level warehouse i
 └── THIRD_PARTY_NOTICES.md  # Third-party library attributions & licenses
 ```
 
-## Quick Start
+## Quick Start (Local)
 
 ### Option 1 — Zero-Install Static Demo (Recommended)
 
@@ -84,4 +92,3 @@ Then visit `http://localhost:8000/demo/index.html` (API endpoints: `/api/health`
 ## License
 
 Original source code in this repository is licensed under the [MIT License](LICENSE). Bundled third-party libraries (`Three.js` and `GSAP`) are subject to their respective terms listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
