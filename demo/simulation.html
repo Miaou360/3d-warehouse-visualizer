@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Warehouse Visualizer (Demo) — Inbound Flow Simulator</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%237c3aed'/%3E%3Cpath d='M32 12L50 22v20L32 52 14 42V22z' fill='%23f3e8ff'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <style>
+    :root {
+      --bg-base: #0b1120;
+      --bg-panel: rgba(15, 23, 42, 0.84);
+      --border-subtle: rgba(148, 163, 184, 0.18);
+      --text-primary: #f8fafc;
+      --text-secondary: #cbd5e1;
+      --text-muted: #64748b;
+      --accent-sky: #38bdf8;
+      --accent-rose: #f43f5e;
+      --accent-blue: #3b82f6;
+      --accent-violet: #a855f7;
+      --accent-emerald: #10b981;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: "Inter", system-ui, sans-serif;
+      overflow: hidden;
+    }
+
+    .sim-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding: 14px 16px;
+      gap: 12px;
+    }
+
+    .glass {
+      background: var(--bg-panel);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      box-shadow: 0 10px 28px rgba(2, 6, 23, 0.5);
+    }
+
+    .sim-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      flex-shrink: 0;
+    }
+
+    .sim-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .sim-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #7c3aed, #38bdf8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+      color: #fff;
+    }
+
+    .sim-brand h1 {
+      font-family: "Outfit", sans-serif;
+      font-size: 19px;
+      font-weight: 700;
+    }
+    .sim-brand p {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 600;
+    }
+
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      background: rgba(14, 165, 233, 0.16);
+      color: #e0f2fe;
+      text-decoration: none;
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+    .back-btn:hover { border-color: var(--accent-sky); }
+
+    .sim-body {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      gap: 12px;
+    }
+
+    .sim-sidebar {
+      width: 300px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    .sec-title {
+      font-family: "Outfit", sans-serif;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-secondary);
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .step-btn {
+      width: 100%;
+      text-align: left;
+      padding: 11px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(15, 23, 42, 0.6);
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .step-btn:hover { border-color: var(--accent-sky); }
+    .step-btn.active {
+      border-color: var(--accent-sky);
+      background: rgba(56, 189, 248, 0.16);
+    }
+    .step-btn strong { font-size: 13px; font-family: "Outfit", sans-serif; }
+    .step-btn span { font-size: 11px; color: var(--text-muted); }
+
+    .action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .primary-btn, .secondary-btn {
+      padding: 10px;
+      border-radius: 9px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      border: 1px solid var(--border-subtle);
+    }
+    .primary-btn {
+      background: linear-gradient(135deg, #0284c7, #6366f1);
+      color: #fff;
+      border: none;
+    }
+    .secondary-btn {
+      background: rgba(30, 41, 59, 0.8);
+      color: var(--text-secondary);
+    }
+
+    .rack-tabs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 5px;
+    }
+    .rack-tab {
+      padding: 6px;
+      border-radius: 6px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(15, 23, 42, 0.65);
+      color: var(--text-secondary);
+      font-size: 11.5px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .rack-tab.active {
+      border-color: var(--accent-violet);
+      background: rgba(168, 85, 247, 0.22);
+      color: #f3e8ff;
+    }
+
+    .bin-matrix {
+      display: grid;
+      grid-template-columns: 32px repeat(6, 1fr);
+      gap: 4px;
+      font-size: 10.5px;
+    }
+    .matrix-head {
+      text-align: center;
+      color: var(--text-muted);
+      font-weight: 700;
+      padding: 3px 0;
+    }
+    .bin-btn {
+      padding: 5px 0;
+      border-radius: 4px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      background: rgba(30, 41, 59, 0.55);
+      color: var(--text-secondary);
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .bin-btn.occupied {
+      background: rgba(16, 185, 129, 0.22);
+      border-color: var(--accent-emerald);
+      color: #6ee7b7;
+    }
+    .bin-btn.target {
+      background: rgba(168, 85, 247, 0.35);
+      border-color: #c084fc;
+      color: #fff;
+    }
+
+    .event-log {
+      flex: 1;
+      min-height: 120px;
+      background: rgba(9, 14, 26, 0.75);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 8px 10px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .log-entry { color: var(--text-secondary); }
+    .log-entry.ok { color: #34d399; }
+    .log-entry.act { color: #38bdf8; }
+
+    .sim-stage {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+    }
+    #sim-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .cam-bar {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      display: flex;
+      gap: 5px;
+      padding: 4px;
+      border-radius: 10px;
+      background: rgba(11, 17, 32, 0.85);
+      border: 1px solid var(--border-subtle);
+      z-index: 10;
+    }
+    .cam-btn {
+      padding: 6px 11px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .cam-btn.active {
+      background: var(--accent-sky);
+      color: #082f49;
+      font-weight: 700;
+    }
+
+    .banner-overlay {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      max-width: 460px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      background: rgba(11, 17, 32, 0.88);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      z-index: 10;
+    }
+    .banner-overlay h3 {
+      font-family: "Outfit", sans-serif;
+      font-size: 14px;
+      color: var(--accent-sky);
+      margin-bottom: 4px;
+    }
+    .banner-overlay p {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="sim-shell">
+    <header class="sim-header glass">
+      <div class="sim-brand">
+        <div class="sim-icon"><i class="fa-solid fa-robot"></i></div>
+        <div>
+          <h1>Inbound Flow Simulator (Demo)</h1>
+          <p>Synthetic Dock-to-High-Bay Automation Digital Twin</p>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <span style="font-size:12px; color:var(--text-secondary);">
+          Target Slot: <strong id="target-slot-label" style="color:var(--accent-sky)">A02-C3</strong>
+        </span>
+        <a href="index.html" class="back-btn">
+          <i class="fa-solid fa-arrow-left"></i>
+          <span>Back to 3D Warehouse Map</span>
+        </a>
+      </div>
+    </header>
+
+    <div class="sim-body">
+      <aside class="sim-sidebar glass">
+        <div class="sec-title">Workflow Steps</div>
+
+        <button class="step-btn" id="step-1-btn">
+          <strong>1. Dock Unloading &amp; Scan</strong>
+          <span>Trailer docks at Gate 02 &rarr; AMR-01 unloads pallet to Scan Station 1</span>
+        </button>
+
+        <button class="step-btn" id="step-2-btn">
+          <strong>2. Aisle Buffer Transfer</strong>
+          <span>AMR-02 routes validated pallet from Scan Station 1 to ASRS handoff</span>
+        </button>
+
+        <button class="step-btn" id="step-3-btn">
+          <strong>3. High-Bay ASRS Put-Away</strong>
+          <span>Vertical lifter stores pallet into selected target rack compartment</span>
+        </button>
+
+        <div class="action-row">
+          <button class="primary-btn" id="run-all-btn">
+            <i class="fa-solid fa-play"></i> Auto Cycle
+          </button>
+          <button class="secondary-btn" id="reset-sim-btn">
+            <i class="fa-solid fa-rotate-left"></i> Reset
+          </button>
+        </div>
+
+        <div class="sec-title">Target Bin Matrix</div>
+        <div class="rack-tabs" id="rack-tabs">
+          <button class="rack-tab" data-rack="A01">A01</button>
+          <button class="rack-tab active" data-rack="A02">A02</button>
+          <button class="rack-tab" data-rack="A03">A03</button>
+          <button class="rack-tab" data-rack="A04">A04</button>
+        </div>
+        <div class="bin-matrix" id="bin-matrix"></div>
+
+        <div class="sec-title">Telemetry Console</div>
+        <div class="event-log" id="event-log"></div>
+      </aside>
+
+      <section class="sim-stage glass" id="sim-stage">
+        <div class="cam-bar">
+          <button class="cam-btn active" data-cam="iso">Isometric 3D</button>
+          <button class="cam-btn" data-cam="top">Top-Down 2D</button>
+          <button class="cam-btn" data-cam="dock">Receiving Docks</button>
+          <button class="cam-btn" data-cam="aisle">High-Bay Aisle</button>
+        </div>
+
+        <canvas id="sim-canvas"></canvas>
+
+        <div class="banner-overlay">
+          <h3 id="sim-banner-title">Ready: Automated Inbound Put-Away</h3>
+          <p id="sim-banner-desc">
+            Select an individual step on the left or click Auto Cycle to simulate dock receiving, barcode verification, and high-bay storage.
+          </p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script src="vendor/three.min.js"></script>
+  <script src="vendor/OrbitControls.js"></script>
+  <script src="vendor/gsap.min.js"></script>
+  <script>
+    (function () {
+      "use strict";
+
+      const BAYS = ["A", "B", "C", "D", "E", "F"];
+      const RACK_X = { A01: -24, A02: -8, A03: 8, A04: 24 };
+      const LEVEL_Y = [0.9, 2.5, 4.1, 5.7, 7.3];
+
+      const target = { rack: "A02", bay: "C", level: 3 };
+      const slotMeshes = {};
+      let scene, camera, renderer, controls, timeline;
+      let dockDoor, trailerGroup, scanLaser, amr1, amr2, lifterGroup, lifterCarriage, activeCargo;
+
+      function logMsg(msg, cls) {
+        const el = document.getElementById("event-log");
+        const row = document.createElement("div");
+        row.className = "log-entry " + (cls || "");
+        const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
+        row.textContent = `[${ts}] ${msg}`;
+        el.prepend(row);
+      }
+
+      function makeLabel(text, borderHex) {
+        const c = document.createElement("canvas");
+        c.width = 256;
+        c.height = 64;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "rgba(11,17,32,0.88)";
+        ctx.fillRect(0, 0, 256, 64);
+        ctx.strokeStyle = borderHex;
+        ctx.lineWidth = 4;
+        ctx.strokeRect(4, 4, 248, 56);
+        ctx.fillStyle = "#f8fafc";
+        ctx.font = "700 24px Outfit, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, 128, 33);
+        const tex = new THREE.CanvasTexture(c);
+        const m = new THREE.Mesh(
+          new THREE.PlaneGeometry(6.5, 1.6),
+          new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide })
+        );
+        m.rotation.x = -Math.PI / 2;
+        m.position.y = 0.03;
+        return m;
+      }
+
+      function buildForklift(hexColor) {
+        const g = new THREE.Group();
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(2.6, 1.1, 3.6),
+          new THREE.MeshStandardMaterial({ color: hexColor, roughness: 0.35 })
+        );
+        body.position.y = 0.75;
+        body.castShadow = true;
+        g.add(body);
+
+        const mast = new THREE.Mesh(
+          new THREE.BoxGeometry(1.5, 3.2, 0.16),
+          new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.6 })
+        );
+        mast.position.set(0, 1.9, 1.8);
+        g.add(mast);
+
+        return g;
+      }
+
+      function initScene() {
+        const canvas = document.getElementById("sim-canvas");
+        const wrap = document.getElementById("sim-stage");
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x090f1d);
+        scene.fog = new THREE.FogExp2(0x090f1d, 0.004);
+
+        camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.5, 350);
+        camera.position.set(0, 58, 74);
+
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+        renderer.shadowMap.enabled = true;
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.maxPolarAngle = Math.PI / 2 - 0.04;
+
+        scene.add(new THREE.HemisphereLight(0xdbeafe, 0x0f172a, 0.9));
+        const dir = new THREE.DirectionalLight(0xffffff, 1.15);
+        dir.position.set(30, 65, 25);
+        dir.castShadow = true;
+        scene.add(dir);
+
+        // Floor & Grid
+        const floor = new THREE.Mesh(
+          new THREE.PlaneGeometry(110, 84),
+          new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.85 })
+        );
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+        scene.add(new THREE.GridHelper(104, 52, 0x1e293b, 0x162033));
+
+        // Receiving Docks (Gates 01-03)
+        [-22, 0, 22].forEach((x, idx) => {
+          const gate = new THREE.Group();
+          gate.position.set(x, 0, -30);
+          const door = new THREE.Mesh(
+            new THREE.BoxGeometry(8, 4.6, 0.25),
+            new THREE.MeshStandardMaterial({ color: idx === 1 ? 0x0284c7 : 0x334155 })
+          );
+          door.position.y = 2.3;
+          gate.add(door);
+          const lbl = makeLabel(`GATE 0${idx + 1}`, idx === 1 ? "#38bdf8" : "#64748b");
+          lbl.position.z = 2.2;
+          gate.add(lbl);
+          scene.add(gate);
+
+          if (idx === 1) {
+            dockDoor = door;
+            trailerGroup = new THREE.Group();
+            const box = new THREE.Mesh(
+              new THREE.BoxGeometry(7.2, 4.4, 13),
+              new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.4, roughness: 0.5 })
+            );
+            box.position.set(0, 2.5, -10);
+            trailerGroup.add(box);
+            trailerGroup.position.z = -14;
+            gate.add(trailerGroup);
+          }
+        });
+
+        // Scan Station 1
+        const scanGroup = new THREE.Group();
+        scanGroup.position.set(-12, 0, -10);
+        const disc = new THREE.Mesh(
+          new THREE.CylinderGeometry(3.6, 3.6, 1.0, 28),
+          new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.5 })
+        );
+        disc.position.y = 0.5;
+        scanGroup.add(disc);
+
+        scanLaser = new THREE.Mesh(
+          new THREE.ConeGeometry(3.2, 3.8, 24, 1, true),
+          new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.24, side: THREE.DoubleSide })
+        );
+        scanLaser.position.y = 2.5;
+        scanLaser.rotation.x = Math.PI;
+        scanLaser.visible = false;
+        scanGroup.add(scanLaser);
+
+        const scanLbl = makeLabel("SCAN STATION 1", "#10b981");
+        scanLbl.position.z = 5.0;
+        scanGroup.add(scanLbl);
+        scene.add(scanGroup);
+
+        // High-Bay Racks A01..A04
+        Object.entries(RACK_X).forEach(([rackId, rx]) => {
+          const rg = new THREE.Group();
+          rg.position.set(rx, 0, 16);
+          slotMeshes[rackId] = {};
+
+          const postMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.6 });
+          const beamMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.45 });
+
+          [-2.2, 2.2].forEach((px) => {
+            [-8, 0, 8].forEach((pz) => {
+              const p = new THREE.Mesh(new THREE.BoxGeometry(0.14, 9.2, 0.14), postMat);
+              p.position.set(px, 4.6, pz);
+              rg.add(p);
+            });
+          });
+
+          LEVEL_Y.forEach((ly) => {
+            const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 16.5), beamMat);
+            b1.position.set(-2.2, ly - 0.45, 0);
+            const b2 = b1.clone();
+            b2.position.x = 2.2;
+            rg.add(b1, b2);
+          });
+
+          BAYS.forEach((bayCode, bIdx) => {
+            const bz = -6.5 + bIdx * 2.6;
+            for (let lvl = 1; lvl <= 5; lvl++) {
+              const key = `${bayCode}${lvl}`;
+              const m = new THREE.Mesh(
+                new THREE.BoxGeometry(1.7, 0.85, 1.9),
+                new THREE.MeshStandardMaterial({
+                  color: 0x1e293b,
+                  transparent: true,
+                  opacity: 0.32,
+                })
+              );
+              m.position.set(0, LEVEL_Y[lvl - 1], bz);
+              m.userData = { occupied: false };
+              rg.add(m);
+              slotMeshes[rackId][key] = m;
+            }
+          });
+
+          const rLbl = makeLabel(`RACK ${rackId}`, "#a855f7");
+          rLbl.position.z = -10.2;
+          rg.add(rLbl);
+          scene.add(rg);
+        });
+
+        // ASRS Vertical Lifter
+        lifterGroup = new THREE.Group();
+        lifterGroup.position.set(0, 0, 3);
+        const mastL = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.18, 0.18, 9.6, 12),
+          new THREE.MeshStandardMaterial({ color: 0x94a3b8 })
+        );
+        mastL.position.set(-1.6, 4.8, 0);
+        const mastR = mastL.clone();
+        mastR.position.x = 1.6;
+        lifterCarriage = new THREE.Mesh(
+          new THREE.BoxGeometry(3.0, 0.2, 2.2),
+          new THREE.MeshStandardMaterial({ color: 0xa855f7 })
+        );
+        lifterCarriage.position.y = 0.9;
+        lifterGroup.add(mastL, mastR, lifterCarriage);
+        scene.add(lifterGroup);
+
+        // Two AMRs + Cargo Pallet
+        amr1 = buildForklift(0xf43f5e);
+        amr1.position.set(-22, 0, -18);
+        scene.add(amr1);
+
+        amr2 = buildForklift(0x3b82f6);
+        amr2.position.set(16, 0, -14);
+        scene.add(amr2);
+
+        activeCargo = new THREE.Mesh(
+          new THREE.BoxGeometry(1.9, 1.1, 1.9),
+          new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.35 })
+        );
+        activeCargo.visible = false;
+        activeCargo.castShadow = true;
+        scene.add(activeCargo);
+
+        window.addEventListener("resize", () => {
+          camera.aspect = wrap.clientWidth / wrap.clientHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+        });
+
+        (function renderLoop() {
+          requestAnimationFrame(renderLoop);
+          controls.update();
+          renderer.render(scene, camera);
+        })();
+      }
+
+      function refreshBinMatrix() {
+        document.getElementById("target-slot-label").textContent = `${target.rack}-${target.bay}${target.level}`;
+        const matrix = document.getElementById("bin-matrix");
+        matrix.innerHTML = "";
+
+        const corner = document.createElement("div");
+        corner.className = "matrix-head";
+        corner.textContent = "LVL";
+        matrix.appendChild(corner);
+        BAYS.forEach((b) => {
+          const h = document.createElement("div");
+          h.className = "matrix-head";
+          h.textContent = b;
+          matrix.appendChild(h);
+        });
+
+        for (let lvl = 5; lvl >= 1; lvl--) {
+          const lh = document.createElement("div");
+          lh.className = "matrix-head";
+          lh.textContent = `L${lvl}`;
+          matrix.appendChild(lh);
+
+          BAYS.forEach((b) => {
+            const key = `${b}${lvl}`;
+            const mesh = slotMeshes[target.rack][key];
+            const btn = document.createElement("button");
+            btn.className = "bin-btn";
+            if (mesh && mesh.userData.occupied) btn.classList.add("occupied");
+            if (target.bay === b && target.level === lvl) btn.classList.add("target");
+            btn.textContent = key;
+            btn.addEventListener("click", () => {
+              target.bay = b;
+              target.level = lvl;
+              highlightSlots();
+              refreshBinMatrix();
+              logMsg(`Selected target bin ${target.rack}-${b}${lvl}`, "act");
+            });
+            matrix.appendChild(btn);
+          });
+        }
+      }
+
+      function highlightSlots() {
+        Object.entries(slotMeshes).forEach(([rId, map]) => {
+          Object.entries(map).forEach(([key, mesh]) => {
+            if (rId === target.rack && key === `${target.bay}${target.level}`) {
+              mesh.material.color.setHex(0xa855f7);
+              mesh.material.opacity = 0.78;
+            } else if (mesh.userData.occupied) {
+              mesh.material.color.setHex(0x10b981);
+              mesh.material.opacity = 0.9;
+            } else {
+              mesh.material.color.setHex(0x1e293b);
+              mesh.material.opacity = 0.32;
+            }
+          });
+        });
+      }
+
+      function resetActors() {
+        if (timeline) timeline.kill();
+        gsap.set(trailerGroup.position, { z: -14 });
+        gsap.set(dockDoor.position, { y: 2.3 });
+        gsap.set(amr1.position, { x: -22, y: 0, z: -18 });
+        gsap.set(amr2.position, { x: 16, y: 0, z: -14 });
+        gsap.set(lifterGroup.position, { x: 0, y: 0, z: 3 });
+        gsap.set(lifterCarriage.position, { y: 0.9 });
+        scanLaser.visible = false;
+        activeCargo.visible = false;
+      }
+
+      function runStep(step, onDone) {
+        resetActors();
+        document.querySelectorAll(".step-btn").forEach((b) => b.classList.remove("active"));
+        document.getElementById(`step-${step}-btn`).classList.add("active");
+
+        timeline = gsap.timeline({ onComplete: () => onDone && onDone() });
+
+        if (step === 1) {
+          document.getElementById("sim-banner-title").textContent = "Step 1: Dock Unloading & Barcode Verification";
+          document.getElementById("sim-banner-desc").textContent =
+            "Inbound trailer backs into Gate 02, AMR-01 retrieves pallet PART-0018 and places it onto Scan Station 1.";
+          logMsg("Step 1 started: Gate 02 trailer docking...", "act");
+
+          timeline
+            .to(trailerGroup.position, { z: 0, duration: 1.1, ease: "power2.out" })
+            .to(dockDoor.position, { y: 6.2, duration: 0.7 })
+            .to(amr1.position, { x: 0, z: -25, duration: 1.0 })
+            .call(() => {
+              activeCargo.visible = true;
+              activeCargo.material.color.setHex(0xf43f5e);
+              activeCargo.position.set(0, 1.3, -23);
+              logMsg("AMR-01 picked inbound pallet at Gate 02", "");
+            })
+            .to(amr1.position, { x: -12, z: -14.5, duration: 1.2 })
+            .to(activeCargo.position, { x: -12, y: 1.55, z: -10, duration: 1.2 }, "<")
+            .call(() => {
+              scanLaser.visible = true;
+              logMsg("Scan Station 1 verifying synthetic label SYN-BX-0401...", "act");
+            })
+            .to(amr1.position, { x: -22, z: -18, duration: 0.9 })
+            .call(() => {
+              scanLaser.visible = false;
+              activeCargo.material.color.setHex(0x10b981);
+              logMsg("Step 1 complete: Barcode verified (PART-0018, 60 EA).", "ok");
+            });
+        } else if (step === 2) {
+          const rx = RACK_X[target.rack];
+          const aisleX = rx < 0 ? rx + 4.2 : rx - 4.2;
+          document.getElementById("sim-banner-title").textContent = "Step 2: Aisle Buffer Transfer";
+          document.getElementById("sim-banner-desc").textContent =
+            `AMR-02 transfers validated pallet from Scan Station 1 to ASRS aisle handoff (${target.rack}).`;
+          activeCargo.visible = true;
+          activeCargo.material.color.setHex(0x38bdf8);
+          activeCargo.position.set(-12, 1.55, -10);
+          logMsg("Step 2 started: AMR-02 routing pallet to aisle buffer...", "act");
+
+          timeline
+            .to(amr2.position, { x: -12, z: -6, duration: 1.0 })
+            .to(amr2.position, { x: aisleX, z: -1, duration: 1.4 })
+            .to(activeCargo.position, { x: aisleX, y: 1.1, z: 3, duration: 1.4 }, "<")
+            .to(amr2.position, { x: 16, z: -14, duration: 1.0 })
+            .call(() => logMsg(`Step 2 complete: Pallet staged at ${target.rack} ASRS buffer.`, "ok"));
+        } else if (step === 3) {
+          const rx = RACK_X[target.rack];
+          const aisleX = rx < 0 ? rx + 4.2 : rx - 4.2;
+          const bayZ = 16 + (-6.5 + BAYS.indexOf(target.bay) * 2.6);
+          const targetY = LEVEL_Y[target.level - 1];
+
+          document.getElementById("sim-banner-title").textContent =
+            `Step 3: High-Bay Put-Away (${target.rack}-${target.bay}${target.level})`;
+          document.getElementById("sim-banner-desc").textContent =
+            `ASRS vertical lifter elevates pallet to Level ${target.level} and stores it into ${target.rack}-${target.bay}${target.level}.`;
+
+          activeCargo.visible = true;
+          activeCargo.material.color.setHex(0xa855f7);
+          activeCargo.position.set(aisleX, 1.1, 3);
+          logMsg(`Step 3 started: ASRS storing into ${target.rack}-${target.bay}${target.level}...`, "act");
+
+          timeline
+            .to(lifterGroup.position, { x: aisleX, z: 3, duration: 0.8 })
+            .to(lifterGroup.position, { z: bayZ, duration: 1.3 })
+            .to(lifterCarriage.position, { y: targetY - 0.5, duration: 1.3 }, "<")
+            .to(activeCargo.position, { z: bayZ, y: targetY, duration: 1.3 }, "<")
+            .to(activeCargo.position, { x: rx, duration: 0.7 })
+            .call(() => {
+              activeCargo.visible = false;
+              const slot = slotMeshes[target.rack][`${target.bay}${target.level}`];
+              if (slot) slot.userData.occupied = true;
+              highlightSlots();
+              refreshBinMatrix();
+              logMsg(`Step 3 complete: Slot ${target.rack}-${target.bay}${target.level} occupied.`, "ok");
+            })
+            .to(lifterCarriage.position, { y: 0.9, duration: 0.8 })
+            .to(lifterGroup.position, { x: 0, z: 3, duration: 1.0 });
+        }
+      }
+
+      function bindSimUI() {
+        document.getElementById("step-1-btn").addEventListener("click", () => runStep(1));
+        document.getElementById("step-2-btn").addEventListener("click", () => runStep(2));
+        document.getElementById("step-3-btn").addEventListener("click", () => runStep(3));
+
+        document.getElementById("run-all-btn").addEventListener("click", () => {
+          logMsg("Starting full 3-step automated inbound cycle...", "act");
+          runStep(1, () => runStep(2, () => runStep(3)));
+        });
+
+        document.getElementById("reset-sim-btn").addEventListener("click", () => {
+          resetActors();
+          document.querySelectorAll(".step-btn").forEach((b) => b.classList.remove("active"));
+          logMsg("Simulation reset to idle state.", "");
+        });
+
+        document.querySelectorAll(".rack-tab").forEach((tab) => {
+          tab.addEventListener("click", () => {
+            document.querySelectorAll(".rack-tab").forEach((t) => t.classList.remove("active"));
+            tab.classList.add("active");
+            target.rack = tab.dataset.rack;
+            highlightSlots();
+            refreshBinMatrix();
+          });
+        });
+
+        document.querySelectorAll(".cam-btn").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            document.querySelectorAll(".cam-btn").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            const mode = btn.dataset.cam;
+            const presets = {
+              iso: { pos: [0, 58, 74], tgt: [0, 2, 0], rot: true },
+              top: { pos: [0, 92, 0.1], tgt: [0, 0, 0], rot: false },
+              dock: { pos: [0, 22, -52], tgt: [0, 2, -22], rot: true },
+              aisle: { pos: [0, 14, 42], tgt: [0, 4, 14], rot: true },
+            };
+            const p = presets[mode] || presets.iso;
+            controls.enableRotate = p.rot;
+            gsap.to(camera.position, {
+              x: p.pos[0],
+              y: p.pos[1],
+              z: p.pos[2],
+              duration: 0.9,
+              onUpdate: () => controls.update(),
+            });
+            gsap.to(controls.target, { x: p.tgt[0], y: p.tgt[1], z: p.tgt[2], duration: 0.9 });
+          });
+        });
+      }
+
+      window.addEventListener("DOMContentLoaded", () => {
+        initScene();
+        highlightSlots();
+        refreshBinMatrix();
+        bindSimUI();
+        logMsg("3D Inbound Simulator initialized with synthetic topology.", "ok");
+      });
+    })();
+  </script>
+</body>
+</html>

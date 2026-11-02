@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Warehouse Visualizer (Demo)</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230284c7'/%3E%3Cpath d='M32 12L50 22v20L32 52 14 42V22z' fill='%23e0f2fe'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Top Header -->
+    <header class="top-header glass-panel">
+      <div class="brand-group">
+        <div class="brand-icon"><i class="fa-solid fa-cubes"></i></div>
+        <div class="brand-titles">
+          <h1>3D Warehouse Visualizer (Demo)</h1>
+          <p id="facility-subtitle">Synthetic Digital Twin Prototype</p>
+        </div>
+      </div>
+
+      <div class="search-bar">
+        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+        <input
+          type="text"
+          id="global-search"
+          placeholder="Search part (PART-0001), rack (A01), model, supplier..."
+          autocomplete="off"
+        />
+        <button id="clear-search-btn" class="clear-search-btn hidden" title="Clear search">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="header-actions">
+        <a href="simulation.html" class="nav-link-btn">
+          <i class="fa-solid fa-route"></i>
+          <span>Inbound Flow Simulator</span>
+        </a>
+        <div class="status-pill">
+          <span class="status-dot"></span>
+          <span id="data-source-badge">SYNTHETIC DATA</span>
+        </div>
+        <div class="clock-label" id="clock-display">--</div>
+      </div>
+    </header>
+
+    <!-- KPI Cards -->
+    <section class="kpi-strip">
+      <div class="kpi-card glass-panel">
+        <div class="kpi-badge kpi-sky"><i class="fa-solid fa-boxes-stacked"></i></div>
+        <div class="kpi-meta">
+          <span class="kpi-title">Total Inventory</span>
+          <div class="kpi-number" id="kpi-total-qty">0</div>
+          <span class="kpi-sub" id="kpi-total-boxes">0 boxes</span>
+        </div>
+      </div>
+
+      <div class="kpi-card glass-panel">
+        <div class="kpi-badge kpi-indigo"><i class="fa-solid fa-barcode"></i></div>
+        <div class="kpi-meta">
+          <span class="kpi-title">Active SKUs</span>
+          <div class="kpi-number" id="kpi-sku-count">0</div>
+          <span class="kpi-sub" id="kpi-model-count">0 product models</span>
+        </div>
+      </div>
+
+      <div class="kpi-card glass-panel">
+        <div class="kpi-badge kpi-emerald"><i class="fa-solid fa-warehouse"></i></div>
+        <div class="kpi-meta">
+          <span class="kpi-title">Bay Occupancy</span>
+          <div class="kpi-number" id="kpi-occupancy">0%</div>
+          <div class="occ-bar-track">
+            <div class="occ-bar-fill" id="kpi-occupancy-bar" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-card glass-panel">
+        <div class="kpi-badge kpi-blue"><i class="fa-solid fa-truck-ramp-box"></i></div>
+        <div class="kpi-meta">
+          <span class="kpi-title">Active Suppliers</span>
+          <div class="kpi-number" id="kpi-supplier-count">0</div>
+          <span class="kpi-sub" id="kpi-avg-turnover">Avg turnover: -- d</span>
+        </div>
+      </div>
+
+      <div class="kpi-card glass-panel">
+        <div class="kpi-badge kpi-amber"><i class="fa-solid fa-clock-rotate-left"></i></div>
+        <div class="kpi-meta">
+          <span class="kpi-title">Aging &gt; 90 Days</span>
+          <div class="kpi-number" id="kpi-aging-boxes">0</div>
+          <span class="kpi-sub" id="kpi-aging-share">0.0% of boxes</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Workspace -->
+    <main class="workspace-row">
+      <!-- Left Filter Sidebar -->
+      <aside class="filter-sidebar glass-panel">
+        <div class="panel-heading">
+          <span><i class="fa-solid fa-sliders"></i> Inventory Filters</span>
+          <span id="filtered-bay-counter" style="font-size: 11px; color: var(--accent-sky)">0 bays</span>
+        </div>
+
+        <div class="control-block">
+          <label><i class="fa-solid fa-building"></i> Facility Layout</label>
+          <div class="segmented-toggle">
+            <button class="seg-btn active" data-facility="north">Facility North</button>
+            <button class="seg-btn" data-facility="south">Facility South</button>
+          </div>
+        </div>
+
+        <div class="control-block">
+          <label for="zone-select"><i class="fa-solid fa-layer-group"></i> Warehouse Zone</label>
+          <select id="zone-select" class="select-input">
+            <option value="ALL">All Zones</option>
+          </select>
+        </div>
+
+        <div class="control-block">
+          <label for="model-select"><i class="fa-solid fa-car-side"></i> Product Model</label>
+          <select id="model-select" class="select-input">
+            <option value="ALL">All Models</option>
+          </select>
+        </div>
+
+        <div class="control-block">
+          <label for="supplier-select"><i class="fa-solid fa-industry"></i> Supplier</label>
+          <input
+            type="text"
+            id="supplier-search"
+            class="mini-filter-input"
+            placeholder="Quick filter supplier..."
+          />
+          <select id="supplier-select" class="select-input">
+            <option value="ALL">All Suppliers</option>
+          </select>
+        </div>
+
+        <div class="control-block">
+          <label><i class="fa-solid fa-shapes"></i> Material Type</label>
+          <div class="pill-grid" id="material-pills">
+            <button class="pill-btn active" data-mat="ALL">ALL</button>
+            <button class="pill-btn" data-mat="ROH1">ROH1</button>
+            <button class="pill-btn" data-mat="ROH2">ROH2</button>
+            <button class="pill-btn" data-mat="HALB">HALB</button>
+            <button class="pill-btn" data-mat="FERT">FERT</button>
+          </div>
+        </div>
+
+        <div class="control-block">
+          <label><i class="fa-solid fa-hourglass-half"></i> Stock Aging Tier</label>
+          <div class="aging-list">
+            <div class="aging-row" data-age="critical">
+              <div class="aging-left">
+                <span class="dot dot-rose"></span>
+                <span>Critical (&gt; 90d)</span>
+              </div>
+              <span class="mini-count" id="count-age-critical">0</span>
+            </div>
+            <div class="aging-row" data-age="warning">
+              <div class="aging-left">
+                <span class="dot dot-amber"></span>
+                <span>Warning (31-90d)</span>
+              </div>
+              <span class="mini-count" id="count-age-warning">0</span>
+            </div>
+            <div class="aging-row" data-age="normal">
+              <div class="aging-left">
+                <span class="dot dot-emerald"></span>
+                <span>Normal (&le; 30d)</span>
+              </div>
+              <span class="mini-count" id="count-age-normal">0</span>
+            </div>
+          </div>
+        </div>
+
+        <button id="reset-filters-btn" class="reset-btn">
+          <i class="fa-solid fa-rotate-left"></i>
+          <span>Reset All Filters</span>
+        </button>
+      </aside>
+
+      <!-- Center 3D Stage -->
+      <section class="stage-panel glass-panel" id="viewport-wrapper">
+        <div class="stage-toolbar">
+          <div class="toolbar-group">
+            <span class="toolbar-caption">View</span>
+            <button class="tool-btn active" id="btn-view-3d">
+              <i class="fa-solid fa-cube"></i> 3D Orbit
+            </button>
+            <button class="tool-btn" id="btn-view-2d">
+              <i class="fa-solid fa-border-all"></i> 2D Top-Down
+            </button>
+            <button class="tool-btn" id="btn-reset-cam">
+              <i class="fa-solid fa-crosshairs"></i> Reset Camera
+            </button>
+          </div>
+
+          <div class="toolbar-group" id="heatmap-buttons">
+            <span class="toolbar-caption">Color Mode</span>
+            <button class="tool-btn active" data-mode="occupancy">Occupancy</button>
+            <button class="tool-btn" data-mode="aging">Stock Aging</button>
+            <button class="tool-btn" data-mode="turnover">Turnover</button>
+            <button class="tool-btn" data-mode="material">Material Type</button>
+          </div>
+        </div>
+
+        <canvas id="three-canvas"></canvas>
+
+        <div class="stage-legend">
+          <div class="legend-header" id="legend-title">Occupancy Heatmap</div>
+          <div class="legend-list" id="legend-items"></div>
+        </div>
+
+        <div class="stage-hint">
+          Left-drag: Orbit &middot; Right-drag: Pan &middot; Scroll: Zoom &middot; Click Bay: Inspect Levels
+        </div>
+
+        <!-- Hover Tooltip -->
+        <div class="hover-tooltip hidden" id="bay-tooltip">
+          <h4 id="tip-bay-id">A01-01</h4>
+          <div class="tip-line"><span>Zone</span><strong id="tip-zone">Zone A</strong></div>
+          <div class="tip-line"><span>Occupancy</span><strong id="tip-occ">80%</strong></div>
+          <div class="tip-line"><span>Inventory</span><strong id="tip-qty">240 EA (4 boxes)</strong></div>
+          <div class="tip-line"><span>Max Age</span><strong id="tip-age">18 days</strong></div>
+        </div>
+
+        <!-- Slide-Over Bay Detail Drawer -->
+        <aside class="detail-drawer" id="detail-drawer">
+          <div class="drawer-header">
+            <div>
+              <h3 id="drawer-bay-title">Bay A01-01</h3>
+              <div class="drawer-sub" id="drawer-bay-zone">Zone A &middot; 5 Levels</div>
+            </div>
+            <button class="drawer-close" id="drawer-close-btn" title="Close inspector">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <div class="drawer-metrics">
+            <div class="drawer-stat">
+              <span>Occupancy</span>
+              <strong id="drawer-occ">0%</strong>
+            </div>
+            <div class="drawer-stat">
+              <span>Total Qty</span>
+              <strong id="drawer-qty">0</strong>
+            </div>
+            <div class="drawer-stat">
+              <span>Avg Turn</span>
+              <strong id="drawer-turn">0d</strong>
+            </div>
+          </div>
+
+          <div class="levels-scroll" id="drawer-levels-list"></div>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <!-- Vendor Libraries -->
+  <script src="vendor/three.min.js"></script>
+  <script src="vendor/OrbitControls.js"></script>
+  <script src="vendor/gsap.min.js"></script>
+
+  <!-- Synthetic Facility Datasets -->
+  <script src="data/facility_north.js"></script>
+  <script src="data/facility_south.js"></script>
+
+  <!-- Application Modules -->
+  <script src="viewer3d.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
