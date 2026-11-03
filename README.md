@@ -8,6 +8,7 @@ An interactive WebGL digital-twin prototype for exploring rack-level warehouse i
 
 - **Live 3D Warehouse Map**: https://miaou360.github.io/3d-warehouse-visualizer/demo/index.html
 - **Live 3D Inbound Flow Simulator**: https://miaou360.github.io/3d-warehouse-visualizer/demo/simulation.html
+- **Related Demo**: [Cross-Facility Material Pulling List](https://miaou360.github.io/sequencing-pulling-list/demo/index.html) ([Repo](https://github.com/Miaou360/sequencing-pulling-list)) — Multi-level BOM explosion, LOT-FIFO allocation, and cross-warehouse transit visibility.
 
 > **100% Synthetic Data**: Every layout coordinate, zone, rack identifier, SKU, product model, supplier, and lot number in this repository is deterministically generated from a fixed random seed (`tools/generate_fake_data.py`). No real facility floorplans or operational records are included.
 
