@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
-"""Deterministic synthetic inventory & rack-layout generator for the 3D Warehouse Visualizer demo.
+"""Deterministic synthetic warehouse + planning data generator for the 3D Warehouse Visualizer demo.
 
-This script generates 100% synthetic warehouse topologies, parts catalogs, and bin-level
-inventory records using a fixed PRNG seed. It reads zero external files.
+Everything here is generated from a fixed PRNG seed and reads zero external files:
+
+* two facilities of 5-level pallet racks at a realistic plant scale (~3,800 pallet positions in total),
+  a small floor staging area and a quality-hold rack per facility;
+* one pallet per rack position, 68.6 % of the rack positions occupied at the snapshot;
+* the planning data for the weekly space simulation (demo/sim_engine.js): part master with pallet
+  quantities, a multi-level BOM, a weekly customer forecast per finished-goods model and the weekly
+  inbound quantities of an order management system (OMS) for every purchased part.
+
+Rack names, part numbers, suppliers, models and quantities are invented - no real facility floorplan or
+operational record is used.
 """
 
 from __future__ import annotations
@@ -10,513 +19,507 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import random
 from pathlib import Path
 from typing import Any
 
 DEFAULT_SEED = 20261102
-SNAPSHOT_DATE = dt.date(2026, 10, 15)
+SNAPSHOT_DATE = dt.date(2026, 11, 16)          # Monday of ISO week 47 = start of the simulation
+HORIZON_WEEKS = 16
+START_OCCUPANCY = 0.686                        # share of rack pallet positions occupied at the snapshot
 
-MODIFIERS = [
-    "Upper",
-    "Lower",
-    "Front",
-    "Rear",
-    "Inner",
-    "Outer",
-    "Center",
-    "Primary",
-    "Auxiliary",
-    "Compact",
-    "Standard",
-    "Linear",
-    "Rotary",
-    "Optical",
-    "Thermal",
-    "Digital",
-]
-
-QUALIFIERS = [
-    "Mounting",
-    "Support",
-    "Control",
-    "Sensor",
-    "Signal",
-    "Drive",
-    "Guide",
-    "Filter",
-    "Protective",
-    "Flexible",
-    "Precision",
-    "Modular",
-]
-
-NOUNS = [
-    "Bracket",
-    "Lens",
-    "Housing",
-    "Connector",
-    "Assembly",
-    "Module",
-    "Gasket",
-    "Bearing",
-    "Actuator",
-    "Cover",
-    "Plate",
-    "Spring",
-    "Switch",
-    "Cable",
-    "Frame",
-    "Panel",
-    "Relay",
-    "Clamp",
-    "Socket",
-    "Cooler",
-    "Adapter",
-]
+MODIFIERS = ["Upper", "Lower", "Front", "Rear", "Inner", "Outer", "Center", "Primary", "Auxiliary", "Compact",
+             "Standard", "Linear", "Rotary", "Optical", "Thermal", "Digital"]
+QUALIFIERS = ["Mounting", "Support", "Control", "Sensor", "Signal", "Drive", "Guide", "Filter", "Protective",
+              "Flexible", "Precision", "Modular"]
+NOUNS = ["Bracket", "Lens", "Housing", "Connector", "Assembly", "Module", "Gasket", "Bearing", "Actuator", "Cover",
+         "Plate", "Spring", "Switch", "Cable", "Frame", "Panel", "Relay", "Clamp", "Socket", "Cooler", "Adapter"]
 
 MODELS = ["Model A", "Model B", "Model C", "Model D", "Model E", "Model F"]
-MATERIAL_TYPES = ["ROH1", "ROH2", "HALB", "FERT"]
 UNITS = ["EA", "SET", "PCS"]
 
+# weekly finished-goods volume per model (units) before seasonality; Model F launches in the horizon
+BASE_VOLUME = {"Model A": 620, "Model B": 490, "Model C": 730, "Model D": 340, "Model E": 250, "Model F": 0}
+LAUNCH_MODEL, LAUNCH_WEEK_INDEX = "Model F", 11                       # ISO week 5 of 2027
+LAUNCH_RAMP = [140, 290, 440, 570, 650]
 
-def build_part_catalog(rng: random.Random, count: int = 150) -> list[dict[str, Any]]:
-    """Build a deterministic catalog of generic synthetic parts."""
-    suppliers = [
-        {"code": f"SUP-{idx:03d}", "name": f"Supplier {idx:03d}"}
-        for idx in range(1, 21)
-    ]
+# size classes of purchased parts: (name, share, pallet quantity choices, usage per parent choices)
+SIZE_CLASSES = [
+    ("bulky", 0.30, [48, 64, 80, 96, 120], [1, 1, 1, 2]),
+    ("medium", 0.45, [240, 320, 400, 480, 600, 800], [1, 1, 2, 2, 4]),
+    ("small", 0.25, [1600, 2000, 2400, 3200, 4000, 4800], [2, 4, 4, 6, 8]),
+]
+LAUNCH_PARTS = 12                              # the last purchased parts are new parts of the launch model
+OMS_COVER_FACTOR = 0.9                         # OMS cover target vs. the snapshot cover (partial pallets add space)
 
-    used_names: set[str] = set()
-    catalog: list[dict[str, Any]] = []
 
+# ----------------------------------------------------------------------------------------------- calendar
+def build_weeks(start: dt.date = SNAPSHOT_DATE, count: int = HORIZON_WEEKS) -> list[dict[str, Any]]:
+    """ISO weeks of the horizon with production and receiving weekdays (1 = Monday ... 7 = Sunday).
+    Synthetic plant calendar: short Christmas week (Mon-Wed) and a shutdown week between the holidays."""
+    weeks = []
+    for i in range(count):
+        monday = start + dt.timedelta(days=7 * i)
+        sunday = monday + dt.timedelta(days=6)
+        iso = monday.isocalendar()
+        prod = recv = [1, 2, 3, 4, 5]
+        if monday <= dt.date(monday.year, 12, 25) <= sunday:
+            prod = recv = [1, 2, 3]
+        elif monday.month == 12 and monday.day >= 26:                 # week between Christmas and New Year
+            prod = recv = []
+        weeks.append({
+            "index": i, "label": f"W{iso[1]:02d}", "iso_year": iso[0], "iso_week": iso[1],
+            "start": monday.isoformat(), "prod_days": list(prod), "recv_days": list(recv),
+        })
+    return weeks
+
+
+# ----------------------------------------------------------------------------------------------- catalog / BOM
+def build_part_catalog(rng: random.Random, count: int = 200) -> list[dict[str, Any]]:
+    """Purchased parts (ROH1 / ROH2) with pallet quantity, supplier, delivery pattern and order policy."""
+    suppliers = [{"code": f"SUP-{i:03d}", "name": f"Supplier {i:03d}"} for i in range(1, 25)]
+    used: set[str] = set()
+    parts = []
     for idx in range(1, count + 1):
         while True:
             desc = f"{rng.choice(MODIFIERS)} {rng.choice(QUALIFIERS)} {rng.choice(NOUNS)}"
-            if desc not in used_names:
-                used_names.add(desc)
+            if desc not in used:
+                used.add(desc)
                 break
+        roll, acc, size = rng.random(), 0.0, SIZE_CLASSES[-1]
+        for cls in SIZE_CLASSES:
+            acc += cls[1]
+            if roll <= acc:
+                size = cls
+                break
+        sup = rng.choice(suppliers)
+        parts.append({
+            "part_no": f"PART-{idx:04d}",
+            "description": desc,
+            "material_type": "ROH1" if rng.random() < 0.62 else "ROH2",
+            "supplier_code": sup["code"],
+            "supplier_name": sup["name"],
+            "size_class": size[0],
+            "pallet_qty": rng.choice(size[2]),
+            "usage_choices": size[3],
+            "uom": rng.choices(UNITS, weights=[0.75, 0.15, 0.10], k=1)[0],
+            "delivery_days": rng.choice([[1, 2, 3, 4, 5], [1, 3, 5], [2, 4], [1, 4], [2], [3], [5]]),
+            "lead_time_weeks": rng.choice([1, 1, 2, 2, 3]),
+            "order_policy": rng.choices(["weekly", "biweekly", "monthly"], weights=[0.6, 0.3, 0.1], k=1)[0],
+            "cover_weeks": round(rng.uniform(1.6, 3.4), 2),
+        })
+    for p in parts[-LAUNCH_PARTS:]:
+        p["launch_part"] = True
+    return parts
 
-        mat_type = rng.choices(MATERIAL_TYPES, weights=[0.42, 0.26, 0.20, 0.12], k=1)[0]
-        supplier = rng.choice(suppliers)
-        model = rng.choice(MODELS)
-        pack_size = rng.choice([10, 12, 20, 24, 30, 40, 50, 60, 80, 100])
-        base_turnover = round(rng.uniform(4.0, 68.0), 1)
 
-        catalog.append(
-            {
-                "part_no": f"PART-{idx:04d}",
-                "description": desc,
-                "model": model,
-                "material_type": mat_type,
-                "supplier_code": supplier["code"],
-                "supplier_name": supplier["name"],
-                "pack_size": pack_size,
-                "uom": rng.choices(UNITS, weights=[0.75, 0.15, 0.10], k=1)[0],
-                "base_turnover_days": base_turnover,
-            }
-        )
-    return catalog
+def build_bom(rng: random.Random, parts: list[dict[str, Any]]
+              ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Finished goods (one per model) -> sub-assemblies (HALB, partly shared) -> purchased parts, plus a few
+    purchased parts used directly by the finished goods. The launch model uses only its own new parts."""
+    fgs = [{"part_no": f"FG-{m[-1]}", "description": f"Finished Module {m[-1]}", "model": m} for m in MODELS]
+    halbs = [{"part_no": f"SUB-{i:03d}", "description": f"Sub-Assembly {rng.choice(QUALIFIERS)} {i:03d}"}
+             for i in range(1, 15)]
+    model_halbs = {
+        "Model A": ["SUB-001", "SUB-002", "SUB-003"], "Model B": ["SUB-003", "SUB-004", "SUB-005"],
+        "Model C": ["SUB-006", "SUB-007", "SUB-008"], "Model D": ["SUB-008", "SUB-009", "SUB-010"],
+        "Model E": ["SUB-011", "SUB-012"], "Model F": ["SUB-013", "SUB-014"],
+    }
+    launch_halbs = set(model_halbs[LAUNCH_MODEL])
+    pool = [p for p in parts if not p.get("launch_part")]
+    launch = [p for p in parts if p.get("launch_part")]
+    rng.shuffle(pool)
+    bom: list[dict[str, Any]] = []
+    cursor = 0
+    regular_halbs = [h for h in halbs if h["part_no"] not in launch_halbs]
+    for h in regular_halbs:
+        n = rng.randint(10, 15)
+        chosen = pool[cursor:cursor + n]
+        cursor += n
+        if len(chosen) < n:                          # common parts shared once the pool is used up
+            chosen += rng.sample(pool[:cursor], n - len(chosen))
+        for p in chosen:
+            bom.append({"parent": h["part_no"], "child": p["part_no"], "qty": rng.choice(p["usage_choices"])})
+    for p in pool[cursor:]:                          # every purchased part is used somewhere
+        h = rng.choice(regular_halbs)
+        bom.append({"parent": h["part_no"], "child": p["part_no"], "qty": rng.choice(p["usage_choices"])})
+    for i, p in enumerate(launch):
+        bom.append({"parent": model_halbs[LAUNCH_MODEL][i % 2], "child": p["part_no"],
+                    "qty": rng.choice(p["usage_choices"])})
+    for fg in fgs:
+        for h in model_halbs[fg["model"]]:
+            bom.append({"parent": fg["part_no"], "child": h, "qty": 1})
+        if fg["model"] != LAUNCH_MODEL:
+            for p in rng.sample(pool, 3):
+                bom.append({"parent": fg["part_no"], "child": p["part_no"], "qty": rng.choice(p["usage_choices"])})
+    return fgs, halbs, bom
 
 
-def _generate_zone_racks(
-    zone_name: str,
-    prefix: str,
-    rack_count: int,
-    bays_per_rack: int,
-    levels: int,
-    origin_x: float,
-    origin_z: float,
-    rack_pitch_x: float,
-    bay_pitch_z: float,
-    max_boxes_per_level: int,
-) -> list[dict[str, Any]]:
-    """Create a regular synthetic grid of rack bays for one warehouse zone."""
-    bays: list[dict[str, Any]] = []
-    for r_idx in range(1, rack_count + 1):
-        sep = "-" if len(prefix) > 1 else ""
-        rack_id = f"{prefix}{sep}{r_idx:02d}"
-        # Pair racks back-to-back with wide forklift aisles between pairs
-        pair_idx = (r_idx - 1) // 2
-        side_offset = -1.15 if (r_idx % 2 == 1) else 1.15
-        if len(prefix) > 1:
-            # Staging / Special lanes spaced evenly
-            world_x = round(origin_x + (r_idx - 1) * rack_pitch_x, 2)
-        else:
-            world_x = round(origin_x + pair_idx * rack_pitch_x + side_offset, 2)
+def build_forecast(rng: random.Random, weeks: list[dict[str, Any]]) -> dict[str, list[int]]:
+    """Weekly customer forecast per finished-goods model (units)."""
+    out: dict[str, list[int]] = {}
+    for m in MODELS:
+        series = []
+        for w in weeks:
+            share = len(w["prod_days"]) / 5.0
+            if m == LAUNCH_MODEL:
+                k = w["index"] - LAUNCH_WEEK_INDEX
+                base = LAUNCH_RAMP[min(k, len(LAUNCH_RAMP) - 1)] if k >= 0 else 0
+            else:
+                base = BASE_VOLUME[m] * (1 + 0.004 * w["index"])
+            series.append(int(round(base * share * rng.uniform(0.94, 1.06) / 10.0) * 10) if share else 0)
+        out[f"FG-{m[-1]}"] = series
+    return out
 
-        for b_idx in range(1, bays_per_rack + 1):
-            world_z = round(origin_z + (b_idx - 1) * bay_pitch_z, 2)
-            bay_id = f"{rack_id}-{b_idx:02d}"
-            bays.append(
-                {
-                    "bay_id": bay_id,
-                    "rack_id": rack_id,
-                    "bay_no": b_idx,
-                    "zone": zone_name,
-                    "world_x": world_x,
-                    "world_z": world_z,
-                    "bay_width": 2.0,
-                    "bay_depth": 2.1,
-                    "max_levels": levels,
-                    "capacity_boxes": levels * max_boxes_per_level,
-                    "max_boxes_per_level": max_boxes_per_level,
-                }
-            )
+
+def explode(bom: list[dict[str, Any]], forecast: dict[str, list[int]], horizon: int) -> dict[str, list[float]]:
+    """Weekly requirement of every leaf (purchased) part = forecast exploded through the multi-level BOM."""
+    children: dict[str, list[tuple[str, float]]] = {}
+    for b in bom:
+        children.setdefault(b["parent"], []).append((b["child"], float(b["qty"])))
+    req: dict[str, list[float]] = {}
+
+    def walk(node: str, qty: list[float]) -> None:
+        if node not in children:
+            acc = req.setdefault(node, [0.0] * horizon)
+            for i, q in enumerate(qty):
+                acc[i] += q
+            return
+        for child, per in children[node]:
+            walk(child, [q * per for q in qty])
+
+    for fg, series in forecast.items():
+        walk(fg, [float(x) for x in series])
+    return req
+
+
+# ----------------------------------------------------------------------------------------------- OMS (inbound)
+def build_oms(rng: random.Random, parts: list[dict[str, Any]], req: dict[str, list[float]],
+              weeks: list[dict[str, Any]], start_stock: dict[str, int], cover_scale: float = 1.0
+              ) -> dict[str, list[int]]:
+    """Weekly inbound quantity per purchased part as an order management system would show it: periodic
+    order-up-to planning on the forecast requirement with a cover target and order multiples. Suppliers are
+    closed in the shutdown week, so those deliveries arrive a week early (holiday build-ahead); the launch
+    model's new parts are stocked two weeks before its first production week."""
+    horizon = len(weeks)
+    period = {"weekly": 1, "biweekly": 2, "monthly": 4}
+    oms: dict[str, list[int]] = {}
+    for p in parts:
+        r = req.get(p["part_no"], [0.0] * horizon)
+        nonzero = [x for x in r if x > 0]
+        avg = sum(nonzero) / len(nonzero) if nonzero else 0.0
+        step = p["pallet_qty"] if rng.random() < 0.5 else max(1, p["pallet_qty"] // rng.choice([4, 6, 8]))
+        per = period[p["order_policy"]]
+        offset = rng.randrange(per)
+        first_use = next((i for i, x in enumerate(r) if x > 0), horizon)
+        on_hand = float(start_stock.get(p["part_no"], 0))
+        arrivals = [0] * horizon
+        for t in range(horizon):
+            due = (t - offset) % per == 0 or (p.get("launch_part") and t == first_use - 2)
+            if due and avg > 0 and t >= first_use - 2:
+                look = max(per, 2 if p.get("launch_part") and t < first_use else per)
+                ahead = 0.0
+                if t + 2 < horizon and not weeks[t + 1]["recv_days"]:   # last delivery before the shutdown:
+                    ahead = sum(r[t + 1:t + look + 1]) + 0.6 * r[t + look + 1]  # most of the restart week pre-built
+                need = sum(r[t:t + look]) + ahead + OMS_COVER_FACTOR * p["cover_weeks"] * cover_scale * avg - on_hand
+                if need > 0:
+                    arrivals[t] = int(math.ceil(need / step) * step)
+            on_hand += arrivals[t] - r[t]
+        for t, w in enumerate(weeks):                # supplier shutdown: deliver one week earlier
+            if not w["recv_days"] and arrivals[t] and t > 0:
+                arrivals[t - 1] += arrivals[t]
+                arrivals[t] = 0
+        for t in range(horizon - 1, 0, -1):          # a little real-life noise: 8 % of deliveries slip a week
+            if arrivals[t - 1] and weeks[t]["recv_days"] and rng.random() < 0.08:
+                arrivals[t] += arrivals[t - 1]
+                arrivals[t - 1] = 0
+        oms[p["part_no"]] = arrivals
+    return oms
+
+
+# ----------------------------------------------------------------------------------------------- layout
+def facility_specs() -> dict[str, dict[str, Any]]:
+    """Rack lines per facility as (bays per line, levels); back-to-back pairs with forklift aisles between."""
+    return {
+        "north": {"name": "Facility North", "subtitle": "Assembly Warehouse (Synthetic, 5-Level Racks)",
+                  "letter": "N", "lines": [(22, 5)] * 14 + [(20, 5)] * 2, "pair_pitch": 8.0, "bay_pitch": 2.4},
+        "south": {"name": "Facility South", "subtitle": "Component Warehouse (Synthetic, 5-Level Racks)",
+                  "letter": "S", "lines": [(24, 5)] * 13 + [(20, 5)] * 2 + [(24, 4)] * 3, "pair_pitch": 8.0,
+                  "bay_pitch": 2.35},
+    }
+
+
+def build_layout(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    lines = spec["lines"]
+    pairs = (len(lines) + 1) // 2
+    x0 = -(pairs - 1) * spec["pair_pitch"] / 2.0
+    max_bays = max(b for b, _ in lines)
+    z0 = -(max_bays - 1) * spec["bay_pitch"] / 2.0 - 3.0
+    half = len(lines) // 2
+    bays = []
+    for li, (n_bays, levels) in enumerate(lines, start=1):
+        pair = (li - 1) // 2
+        world_x = round(x0 + pair * spec["pair_pitch"] + (-1.15 if li % 2 == 1 else 1.15), 2)
+        rack_id = f"{spec['letter']}{li:02d}"
+        for b in range(1, n_bays + 1):
+            bays.append({
+                "bay_id": f"{rack_id}-{b:02d}", "rack_id": rack_id, "bay_no": b,
+                "zone": "Zone A" if li <= half else "Zone B", "storage": "rack", "in_capacity": True,
+                "world_x": world_x, "world_z": round(z0 + (b - 1) * spec["bay_pitch"], 2),
+                "bay_width": 2.0, "bay_depth": 2.1, "max_levels": levels, "max_boxes_per_level": 1,
+                "capacity_boxes": levels,
+            })
+    z_front = round(z0 + max_bays * spec["bay_pitch"] + 4.5, 2)
+    for i in range(1, 9):              # dock-side floor staging lanes (not storage capacity)
+        bays.append({
+            "bay_id": f"{spec['letter']}-STG-{i:02d}", "rack_id": f"{spec['letter']}-STG", "bay_no": i,
+            "zone": "Staging", "storage": "floor", "in_capacity": False,
+            "world_x": round(x0 - 2.0 + (i - 1) * 2.6, 2), "world_z": z_front,
+            "bay_width": 2.2, "bay_depth": 2.4, "max_levels": 1, "max_boxes_per_level": 3, "capacity_boxes": 3,
+        })
+    for i in range(1, 7):              # quality-hold rack (not storage capacity)
+        bays.append({
+            "bay_id": f"{spec['letter']}-QH-{i:02d}", "rack_id": f"{spec['letter']}-QH", "bay_no": i,
+            "zone": "Special", "storage": "rack", "in_capacity": False,
+            "world_x": round(-x0 - 10.0 + (i - 1) * 2.4, 2), "world_z": z_front,
+            "bay_width": 2.0, "bay_depth": 2.1, "max_levels": 3, "max_boxes_per_level": 1, "capacity_boxes": 3,
+        })
     return bays
 
 
-def generate_facility_dataset(
-    facility_key: str,
-    facility_name: str,
-    subtitle: str,
-    zone_specs: list[dict[str, Any]],
-    seed: int,
-) -> dict[str, Any]:
-    """Generate a complete synthetic warehouse dataset for one facility."""
-    rng = random.Random(seed)
-    catalog = build_part_catalog(rng, count=150)
+# ----------------------------------------------------------------------------------------------- stock
+def pallets_for(qty: int, pallet_qty: int) -> list[int]:
+    """Full pallets plus one partial pallet."""
+    full, rest = divmod(int(qty), int(pallet_qty))
+    return [int(pallet_qty)] * full + ([rest] if rest else [])
 
-    all_bays: list[dict[str, Any]] = []
-    for spec in zone_specs:
-        all_bays.extend(_generate_zone_racks(**spec))
 
+def build_start_stock(rng: random.Random, parts: list[dict[str, Any]], req: dict[str, list[float]],
+                      target_pallets: int) -> dict[str, Any]:
+    """Pieces on hand per purchased part at the snapshot: cover weeks of the coming requirement, scaled so the
+    pallets (full pallets + one partial pallet per part) fill exactly target_pallets rack positions. The key
+    '__scale__' returns the cover scale (the OMS plan keeps the same cover)."""
+    regular = [p for p in parts if not p.get("launch_part")]
+
+    def count(stock: dict[str, int]) -> int:
+        return sum(len(pallets_for(stock[p["part_no"]], p["pallet_qty"])) for p in regular if stock[p["part_no"]])
+
+    def build(scale: float) -> dict[str, int]:
+        out = {}
+        for p in regular:
+            r = req.get(p["part_no"], [0.0])[:3]
+            out[p["part_no"]] = int(round(sum(r) / max(1, len(r)) * p["cover_weeks"] * scale))
+        return out
+
+    lo, hi = 0.05, 8.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if count(build(mid)) < target_pallets:
+            lo = mid
+        else:
+            hi = mid
+    stock = build(lo)
+    stock["__scale__"] = lo                                          # cover scale, reused by the OMS plan
+    guard = 0
+    scale = stock.pop("__scale__")
+    while count(stock) != target_pallets and guard < 20000:          # exact pallet count with whole pallets
+        guard += 1
+        p = rng.choice(regular)
+        if count(stock) < target_pallets:
+            stock[p["part_no"]] += p["pallet_qty"]
+        elif stock[p["part_no"]] > p["pallet_qty"]:
+            stock[p["part_no"]] -= p["pallet_qty"]
+    stock["__scale__"] = scale
+    return stock
+
+
+# ----------------------------------------------------------------------------------------------- assemble
+def build_all(base_seed: int = DEFAULT_SEED) -> dict[str, Any]:
+    rng = random.Random(base_seed)
+    weeks = build_weeks()
+    parts = build_part_catalog(rng)
+    fgs, halbs, bom = build_bom(rng, parts)
+    forecast = build_forecast(rng, weeks)
+    req = explode(bom, forecast, len(weeks))
+
+    parents: dict[str, list[str]] = {}
+    for b in bom:
+        parents.setdefault(b["child"], []).append(b["parent"])
+
+    def model_for(part_no: str) -> str:
+        todo, seen = [part_no], set()
+        while todo:
+            n = todo.pop(0)
+            if n.startswith("FG-"):
+                return f"Model {n[-1]}"
+            for par in parents.get(n, []):
+                if par not in seen:
+                    seen.add(par)
+                    todo.append(par)
+        return "Model A"
+
+    model_of = {p["part_no"]: model_for(p["part_no"]) for p in parts}
+    specs = facility_specs()
+    layouts = {k: build_layout(s) for k, s in specs.items()}
+    positions = {k: [(b, lvl) for b in bays if b["in_capacity"] for lvl in range(1, b["max_levels"] + 1)]
+                 for k, bays in layouts.items()}
+    occupied = {k: int(round(len(v) * START_OCCUPANCY)) for k, v in positions.items()}
+    static_n = {k: int(round(n * 0.05)) for k, n in occupied.items()}     # sub-assembly / FG pallets
+    sim_n = sum(occupied.values()) - sum(static_n.values())
+    start_stock = build_start_stock(rng, parts, req, sim_n)
+    cover_scale = start_stock.pop("__scale__")
+    oms = build_oms(rng, parts, req, weeks, start_stock, cover_scale)
+
+    sim_pallets: list[dict[str, Any]] = []
+    for p in parts:
+        q = start_stock.get(p["part_no"], 0)
+        if not q:
+            continue
+        pls = pallets_for(q, p["pallet_qty"])
+        weekly = max(1.0, sum(req.get(p["part_no"], [0.0])[:3]) / 3.0)
+        cover_days = max(2, int(round(q / weekly * 7)))
+        for i, qty in enumerate(pls):                                 # first pallet = oldest (FIFO)
+            age = int(round(cover_days * (1 - i / len(pls)))) + rng.randint(0, 3)
+            sim_pallets.append({"part": p, "qty": qty, "age": age, "turnover": float(cover_days)})
+    rng.shuffle(sim_pallets)                                          # free location: any position
+    statics = halbs + fgs
+
+    datasets: dict[str, Any] = {}
     box_seq = 0
-    lot_seq = 0
+    cursor = 0
+    for k, spec in specs.items():
+        pos = list(positions[k])
+        rng.shuffle(pos)
+        chosen = pos[:occupied[k]]
+        n_static = static_n[k]
+        n_sim = occupied[k] - n_static
+        items_by_bay: dict[str, list[dict[str, Any]]] = {}
 
-    populated_bays: list[dict[str, Any]] = []
-    total_boxes = 0
-    total_qty = 0
+        def add(bay_id: str, level: int, slot: int, rec: dict[str, Any], qty: int, age: int, turn: float) -> None:
+            nonlocal box_seq
+            box_seq += 1
+            items_by_bay.setdefault(bay_id, []).append({
+                "box_id": f"PLT-{box_seq:05d}", "lot_no": f"SYN-LT-{box_seq:05d}", "level": level, "slot": slot,
+                **rec, "qty": int(qty), "gr_date": (SNAPSHOT_DATE - dt.timedelta(days=age)).isoformat(),
+                "age_days": int(age), "turnover_days": round(turn, 1),
+            })
 
-    for bay in all_bays:
-        zone = bay["zone"]
-        # Target occupancy probability varies slightly by synthetic zone
-        occ_prob = {
-            "Zone A": 0.84,
-            "Zone B": 0.78,
-            "Zone C": 0.72,
-            "Staging": 0.65,
-            "Special": 0.52,
-        }.get(zone, 0.75)
+        def part_rec(p: dict[str, Any], simulated: bool) -> dict[str, Any]:
+            return {"part_no": p["part_no"], "description": p["description"], "model": model_of[p["part_no"]],
+                    "material_type": p["material_type"], "supplier_code": p["supplier_code"],
+                    "supplier_name": p["supplier_name"], "uom": p["uom"], "simulated": simulated}
 
-        items: list[dict[str, Any]] = []
-        max_levels = bay["max_levels"]
-        max_per_lvl = bay["max_boxes_per_level"]
+        for bay, lvl in chosen[:n_static]:
+            s = rng.choice(statics)
+            add(bay["bay_id"], lvl, 0, {"part_no": s["part_no"], "description": s["description"],
+                                         "model": s.get("model", "Model A"),
+                                         "material_type": "FERT" if s["part_no"].startswith("FG") else "HALB",
+                                         "supplier_code": "IN-HOUSE", "supplier_name": "In-House Production",
+                                         "uom": "EA", "simulated": False},
+                rng.choice([12, 16, 24, 32]), rng.randint(1, 45), round(rng.uniform(5, 30), 1))
+        for (bay, lvl), pl in zip(chosen[n_static:], sim_pallets[cursor:cursor + n_sim]):
+            add(bay["bay_id"], lvl, 0, part_rec(pl["part"], True), pl["qty"], pl["age"], pl["turnover"])
+        cursor += n_sim
+        for bay in layouts[k]:                    # staging: inbound pallets waiting for put-away
+            if bay["zone"] == "Staging" and rng.random() < 0.65:
+                for slot in range(rng.randint(1, 3)):
+                    p = rng.choice([x for x in parts if not x.get("launch_part")])
+                    add(bay["bay_id"], 1, slot, part_rec(p, False), p["pallet_qty"], 0, 1.5)
 
-        # Pick 1-2 primary parts per bay for realistic put-away grouping
-        bay_parts = rng.sample(catalog, k=2 if rng.random() < 0.45 else 1)
-
-        for lvl in range(1, max_levels + 1):
-            if rng.random() > occ_prob:
-                continue
-
-            boxes_in_level = rng.randint(1, max_per_lvl)
-            part = rng.choice(bay_parts)
-
-            # Sample synthetic age bucket: 70% <=30d, 20% 31-90d, 10% >90d
-            bucket_roll = rng.random()
-            if zone == "Special":
-                age_days = rng.randint(45, 165)
-            elif zone == "Staging":
-                age_days = rng.randint(1, 14)
-            elif bucket_roll < 0.70:
-                age_days = rng.randint(1, 30)
-            elif bucket_roll < 0.90:
-                age_days = rng.randint(31, 90)
-            else:
-                age_days = rng.randint(91, 180)
-
-            gr_date = (SNAPSHOT_DATE - dt.timedelta(days=age_days)).strftime("%Y-%m-%d")
-            turnover_days = max(
-                1.5,
-                round(part["base_turnover_days"] * rng.uniform(0.65, 1.45), 1),
-            )
-
-            lot_seq += 1
-            lot_no = f"SYN-LT-{lot_seq:04d}"
-
-            for _ in range(boxes_in_level):
-                box_seq += 1
-                qty = part["pack_size"]
-                if rng.random() < 0.12:
-                    qty = max(2, int(part["pack_size"] * rng.uniform(0.4, 0.9)))
-
-                items.append(
-                    {
-                        "box_id": f"SYN-BX-{box_seq:04d}",
-                        "lot_no": lot_no,
-                        "level": lvl,
-                        "part_no": part["part_no"],
-                        "description": part["description"],
-                        "model": part["model"],
-                        "material_type": part["material_type"],
-                        "supplier_code": part["supplier_code"],
-                        "supplier_name": part["supplier_name"],
-                        "qty": qty,
-                        "uom": part["uom"],
-                        "gr_date": gr_date,
-                        "age_days": age_days,
-                        "turnover_days": turnover_days,
-                    }
-                )
-                total_boxes += 1
-                total_qty += qty
-
-        box_count = len(items)
-        capacity = bay["capacity_boxes"]
-        occupancy_pct = round(min(100.0, (box_count / capacity) * 100.0), 1) if capacity else 0.0
-        max_age = max((it["age_days"] for it in items), default=0)
-        avg_turnover = (
-            round(sum(it["turnover_days"] for it in items) / box_count, 1)
-            if box_count
-            else 0.0
-        )
-        dominant_mat = items[0]["material_type"] if items else "NONE"
-
-        populated_bays.append(
-            {
-                **bay,
-                "box_count": box_count,
-                "total_qty": total_qty_for_bay(items),
-                "occupancy_pct": occupancy_pct,
-                "max_age_days": max_age,
-                "avg_turnover_days": avg_turnover,
-                "dominant_material_type": dominant_mat,
+        bays_out = []
+        for bay in layouts[k]:
+            items = sorted(items_by_bay.get(bay["bay_id"], []), key=lambda it: (it["level"], it["slot"]))
+            n = len(items)
+            bays_out.append({
+                **bay, "box_count": n, "total_qty": sum(it["qty"] for it in items),
+                "occupancy_pct": round(100.0 * n / bay["capacity_boxes"], 1),
+                "max_age_days": max((it["age_days"] for it in items), default=0),
+                "avg_turnover_days": round(sum(it["turnover_days"] for it in items) / n, 1) if n else 0.0,
+                "dominant_material_type": items[0]["material_type"] if items else "NONE",
                 "items": items,
-            }
-        )
-
-    zones_summary: list[dict[str, Any]] = []
-    seen_zones: list[str] = []
-    for b in populated_bays:
-        if b["zone"] not in seen_zones:
-            seen_zones.append(b["zone"])
-
-    for z_name in seen_zones:
-        z_bays = [b for b in populated_bays if b["zone"] == z_name]
-        xs = [b["world_x"] for b in z_bays]
-        zs = [b["world_z"] for b in z_bays]
-        zones_summary.append(
-            {
-                "zone": z_name,
-                "min_x": round(min(xs) - 2.6, 2),
-                "max_x": round(max(xs) + 2.6, 2),
-                "min_z": round(min(zs) - 2.6, 2),
-                "max_z": round(max(zs) + 2.6, 2),
-                "bay_count": len(z_bays),
-            }
-        )
-
-    return {
-        "facility_key": facility_key,
-        "facility_name": facility_name,
-        "subtitle": subtitle,
-        "snapshot_date": SNAPSHOT_DATE.isoformat(),
-        "seed": seed,
-        "summary": {
-            "total_bays": len(populated_bays),
-            "occupied_bays": sum(1 for b in populated_bays if b["box_count"] > 0),
-            "total_boxes": total_boxes,
-            "total_qty": total_qty,
+            })
+        zones = []
+        for z in ["Zone A", "Zone B", "Staging", "Special"]:
+            zb = [b for b in bays_out if b["zone"] == z]
+            if zb:
+                xs, zs = [b["world_x"] for b in zb], [b["world_z"] for b in zb]
+                zones.append({"zone": z, "min_x": round(min(xs) - 2.6, 2), "max_x": round(max(xs) + 2.6, 2),
+                              "min_z": round(min(zs) - 2.6, 2), "max_z": round(max(zs) + 2.6, 2),
+                              "bay_count": len(zb)})
+        rack = [b for b in bays_out if b["in_capacity"]]
+        datasets[k] = {
+            "facility_key": k, "facility_name": spec["name"], "subtitle": spec["subtitle"],
+            "snapshot_date": SNAPSHOT_DATE.isoformat(), "seed": base_seed,
+            "summary": {
+                "total_bays": len(bays_out), "rack_bays": len(rack),
+                "pallet_positions": sum(b["capacity_boxes"] for b in rack),
+                "occupied_positions": sum(b["box_count"] for b in rack),
+                "occupied_bays": sum(1 for b in bays_out if b["box_count"] > 0),
+                "total_boxes": sum(b["box_count"] for b in bays_out),
+                "total_qty": sum(b["total_qty"] for b in bays_out),
+            },
+            "zones": zones, "bays": bays_out,
+        }
+    planning = {
+        "snapshot_date": SNAPSHOT_DATE.isoformat(), "seed": base_seed, "start_occupancy_target": START_OCCUPANCY,
+        "capacity_positions": sum(len(v) for v in positions.values()), "weeks": weeks,
+        "models": [{"model": f["model"], "fg_part": f["part_no"], "description": f["description"]} for f in fgs],
+        "sub_assemblies": halbs,
+        "parts": [{k2: v for k2, v in p.items() if k2 != "usage_choices"} for p in parts],
+        "bom": bom, "forecast": forecast, "oms": oms,
+        "notes": {
+            "inbound": "OMS weekly order quantity per part; pallets = ceil(qty / pallet_qty) per weekly delivery",
+            "outbound": "forecast exploded through the BOM; a pallet position frees only when its pallet is empty",
+            "calendar": "Christmas week Mon-Wed, shutdown week between the holidays (no production, no deliveries)",
+            "launch": f"{LAUNCH_MODEL} starts in week index {LAUNCH_WEEK_INDEX}; its new parts arrive 2 weeks earlier",
+            "static": "sub-assembly / finished-goods pallets and floor staging are held constant",
         },
-        "zones": zones_summary,
-        "bays": populated_bays,
     }
-
-
-def total_qty_for_bay(items: list[dict[str, Any]]) -> int:
-    return sum(int(it["qty"]) for it in items)
+    return {"facilities": datasets, "planning": planning}
 
 
 def build_all_facilities(base_seed: int = DEFAULT_SEED) -> dict[str, dict[str, Any]]:
-    """Build synthetic datasets for Facility North and Facility South."""
-    north_specs = [
-        {
-            "zone_name": "Zone A",
-            "prefix": "A",
-            "rack_count": 8,
-            "bays_per_rack": 10,
-            "levels": 5,
-            "origin_x": -34.0,
-            "origin_z": -24.0,
-            "rack_pitch_x": 8.0,
-            "bay_pitch_z": 2.4,
-            "max_boxes_per_level": 2,
-        },
-        {
-            "zone_name": "Zone B",
-            "prefix": "B",
-            "rack_count": 8,
-            "bays_per_rack": 10,
-            "levels": 5,
-            "origin_x": 8.0,
-            "origin_z": -24.0,
-            "rack_pitch_x": 8.0,
-            "bay_pitch_z": 2.4,
-            "max_boxes_per_level": 2,
-        },
-        {
-            "zone_name": "Zone C",
-            "prefix": "C",
-            "rack_count": 6,
-            "bays_per_rack": 8,
-            "levels": 4,
-            "origin_x": -34.0,
-            "origin_z": 8.0,
-            "rack_pitch_x": 8.0,
-            "bay_pitch_z": 2.4,
-            "max_boxes_per_level": 2,
-        },
-        {
-            "zone_name": "Staging",
-            "prefix": "STG",
-            "rack_count": 4,
-            "bays_per_rack": 6,
-            "levels": 1,
-            "origin_x": 8.0,
-            "origin_z": 10.0,
-            "rack_pitch_x": 5.2,
-            "bay_pitch_z": 2.6,
-            "max_boxes_per_level": 3,
-        },
-        {
-            "zone_name": "Special",
-            "prefix": "SPC",
-            "rack_count": 2,
-            "bays_per_rack": 6,
-            "levels": 3,
-            "origin_x": 30.0,
-            "origin_z": 10.0,
-            "rack_pitch_x": 5.5,
-            "bay_pitch_z": 2.6,
-            "max_boxes_per_level": 2,
-        },
-    ]
+    """Synthetic datasets for Facility North and Facility South (kept for the optional FastAPI backend)."""
+    return build_all(base_seed)["facilities"]
 
-    south_specs = [
-        {
-            "zone_name": "Zone A",
-            "prefix": "A",
-            "rack_count": 6,
-            "bays_per_rack": 12,
-            "levels": 6,
-            "origin_x": -28.0,
-            "origin_z": -26.0,
-            "rack_pitch_x": 8.5,
-            "bay_pitch_z": 2.35,
-            "max_boxes_per_level": 2,
-        },
-        {
-            "zone_name": "Zone B",
-            "prefix": "B",
-            "rack_count": 6,
-            "bays_per_rack": 12,
-            "levels": 5,
-            "origin_x": 6.0,
-            "origin_z": -26.0,
-            "rack_pitch_x": 8.5,
-            "bay_pitch_z": 2.35,
-            "max_boxes_per_level": 2,
-        },
-        {
-            "zone_name": "Zone C",
-            "prefix": "C",
-            "rack_count": 4,
-            "bays_per_rack": 8,
-            "levels": 4,
-            "origin_x": -28.0,
-            "origin_z": 10.0,
-            "rack_pitch_x": 8.5,
-            "bay_pitch_z": 2.4,
-            "max_boxes_per_level": 2,
-        },
-        {
-            "zone_name": "Staging",
-            "prefix": "STG",
-            "rack_count": 5,
-            "bays_per_rack": 6,
-            "levels": 1,
-            "origin_x": 2.0,
-            "origin_z": 10.0,
-            "rack_pitch_x": 5.0,
-            "bay_pitch_z": 2.5,
-            "max_boxes_per_level": 3,
-        },
-        {
-            "zone_name": "Special",
-            "prefix": "SPC",
-            "rack_count": 2,
-            "bays_per_rack": 6,
-            "levels": 3,
-            "origin_x": 28.0,
-            "origin_z": 10.0,
-            "rack_pitch_x": 5.5,
-            "bay_pitch_z": 2.5,
-            "max_boxes_per_level": 2,
-        },
-    ]
 
-    return {
-        "north": generate_facility_dataset(
-            facility_key="north",
-            facility_name="Facility North",
-            subtitle="High-Bay Distribution Hub (Synthetic)",
-            zone_specs=north_specs,
-            seed=base_seed,
-        ),
-        "south": generate_facility_dataset(
-            facility_key="south",
-            facility_name="Facility South",
-            subtitle="Cross-Dock & Component Center (Synthetic)",
-            zone_specs=south_specs,
-            seed=base_seed + 101,
-        ),
-    }
+def build_planning(base_seed: int = DEFAULT_SEED) -> dict[str, Any]:
+    return build_all(base_seed)["planning"]
 
 
 def write_demo_js_bundles(output_dir: Path, base_seed: int = DEFAULT_SEED) -> list[Path]:
     """Write compact JS bundles into demo/data/ so index.html works offline or over HTTP."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    datasets = build_all_facilities(base_seed=base_seed)
+    data = build_all(base_seed)
     written: list[Path] = []
-
-    for key, payload in datasets.items():
+    for key, payload in data["facilities"].items():
         target = output_dir / f"facility_{key}.js"
-        compact_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
-        js_source = (
-            "window.DEMO_FACILITIES = window.DEMO_FACILITIES || {};\n"
-            f'window.DEMO_FACILITIES["{key}"] = {compact_json};\n'
-        )
-        target.write_text(js_source, encoding="utf-8")
+        compact = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
+        target.write_text("window.DEMO_FACILITIES = window.DEMO_FACILITIES || {};\n"
+                          f'window.DEMO_FACILITIES["{key}"] = {compact};\n', encoding="utf-8")
         written.append(target)
-
+    target = output_dir / "planning.js"
+    compact = json.dumps(data["planning"], separators=(",", ":"), ensure_ascii=True)
+    target.write_text(f"window.DEMO_PLANNING = {compact};\n", encoding="utf-8")
+    written.append(target)
+    names = [p.name for p in written]
+    target = output_dir / "manifest.js"                # the data files index.html loads, in order
+    target.write_text(f'window.DEMO_DATA_MODE = "synthetic";\nwindow.DEMO_DATA_FILES = {json.dumps(names)};\n',
+                      encoding="utf-8")
+    written.append(target)
     return written
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Generate deterministic synthetic warehouse datasets for the 3D demo."
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=DEFAULT_SEED,
-        help=f"Deterministic random seed (default: {DEFAULT_SEED})",
-    )
-    parser.add_argument(
-        "--out-dir",
-        type=Path,
-        default=Path(__file__).resolve().parent.parent / "demo" / "data",
-        help="Target output directory for generated JS data bundles",
-    )
+    parser = argparse.ArgumentParser(description="Generate deterministic synthetic warehouse and planning data.")
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help=f"random seed (default: {DEFAULT_SEED})")
+    parser.add_argument("--out-dir", type=Path, default=Path(__file__).resolve().parent.parent / "demo" / "data",
+                        help="target directory for the generated JS data bundles")
     args = parser.parse_args()
-
-    files = write_demo_js_bundles(output_dir=args.out_dir, base_seed=args.seed)
-    for fpath in files:
-        size_kb = fpath.stat().st_size / 1024.0
-        print(f"Generated {fpath.name} ({size_kb:.1f} KB)")
+    for fpath in write_demo_js_bundles(output_dir=args.out_dir, base_seed=args.seed):
+        print(f"Generated {fpath.name} ({fpath.stat().st_size / 1024.0:.1f} KB)")
 
 
 if __name__ == "__main__":
     main()
-

@@ -858,3 +858,521 @@ body {
   color: #fb7185;
 }
 
+
+/* ==========================================================================
+   Weekly Space Simulation dock (under the 3D stage)
+   ========================================================================== */
+.sim-dock {
+  flex: 0 0 auto;
+  height: clamp(280px, 31vh, 340px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px 12px;
+  transition: height 240ms ease;
+  overflow: hidden;
+}
+
+.sim-dock.collapsed {
+  height: 58px;
+}
+
+.sim-dock.collapsed .sim-collapse i {
+  transform: rotate(180deg);
+}
+
+.sim-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 38px;
+}
+
+.sim-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.sim-title > div {
+  min-width: 0;
+}
+
+.sim-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.sim-actions .tool-btn {
+  border: 1px solid var(--border-subtle);
+  background: rgba(11, 17, 32, 0.6);
+}
+
+.sim-actions .tool-btn.active {
+  color: var(--accent-sky);
+  border-color: var(--border-highlight);
+}
+
+.sim-title h2 {
+  font-family: var(--font-heading);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sim-title h2 i {
+  color: var(--accent-sky);
+}
+
+.sim-title p {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sim-collapse {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: rgba(11, 17, 32, 0.6);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.sim-collapse i {
+  transition: transform 200ms;
+}
+
+.sim-kpis {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.sim-kpi {
+  display: flex;
+  flex-direction: column;
+  min-width: 128px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+}
+
+.sim-kpi span {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.sim-kpi strong {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.sim-kpi em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.sim-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sim-ctl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.sim-ctl .select-input {
+  width: auto;
+  padding: 5px 8px;
+  font-size: 11.5px;
+}
+
+.sim-ctl input[type="range"] {
+  width: 110px;
+  accent-color: var(--accent-sky);
+}
+
+.sim-ctl b {
+  min-width: 38px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-legend {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+  align-items: center;
+}
+
+.sim-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sim-legend .sw {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+}
+
+.sim-legend .sw-bar {
+  background: var(--accent-sky);
+  border-radius: 2px;
+}
+
+.sim-legend .sw-peak {
+  height: 2px;
+  width: 14px;
+  background: var(--text-primary);
+}
+
+.st-watch {
+  color: #fab219;
+}
+
+.st-crit {
+  color: #d03b3b;
+}
+
+.sim-controls .tool-btn {
+  border: 1px solid var(--border-subtle);
+  background: rgba(11, 17, 32, 0.6);
+}
+
+.sim-controls .tool-btn.active {
+  color: var(--accent-sky);
+  border-color: var(--border-highlight);
+}
+
+.sim-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+
+.sim-chart-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.sim-chart {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.sim-chart svg {
+  display: block;
+  position: absolute;
+  inset: 0;
+}
+
+.sim-grid {
+  stroke: rgba(148, 163, 184, 0.12);
+  stroke-width: 1;
+}
+
+.sim-axis,
+.sim-th-label,
+.sim-xlab,
+.sim-in,
+.sim-out,
+.sim-direct {
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  fill: var(--text-muted);
+}
+
+.sim-xlab {
+  fill: var(--text-secondary);
+  font-weight: 600;
+}
+
+.sim-in {
+  fill: var(--text-secondary);
+}
+
+.sim-direct {
+  fill: var(--text-primary);
+  font-weight: 700;
+}
+
+.sim-th-warn {
+  stroke: #fab219;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.75;
+}
+
+.sim-th-crit {
+  stroke: #d03b3b;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.9;
+}
+
+.sim-th-cap {
+  stroke: rgba(248, 250, 252, 0.55);
+  stroke-width: 1;
+}
+
+.sim-bar {
+  fill: var(--accent-sky);
+}
+
+.sim-bar.now {
+  fill: rgba(148, 163, 184, 0.55);
+}
+
+.sim-peak {
+  stroke: var(--text-primary);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.sim-risk {
+  font-size: 12px;
+}
+
+.sim-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.sim-col:hover .sim-hit,
+.sim-col:focus .sim-hit {
+  fill: rgba(148, 163, 184, 0.07);
+}
+
+.sim-col.selected .sim-hit {
+  fill: rgba(56, 189, 248, 0.1);
+  stroke: var(--border-highlight);
+  stroke-width: 1;
+}
+
+.sim-col:focus {
+  outline: none;
+}
+
+.sim-tip {
+  position: absolute;
+  top: 6px;
+  min-width: 180px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: rgba(11, 17, 32, 0.94);
+  border: 1px solid var(--border-subtle);
+  pointer-events: none;
+  z-index: 5;
+  font-size: 11.5px;
+}
+
+.sim-tip.hidden,
+.sim-table.hidden,
+.sim-chart.hidden {
+  display: none;
+}
+
+.sim-tip-head {
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.sim-tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sim-tip-row strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-tip-row span {
+  color: var(--text-muted);
+}
+
+.sim-table {
+  flex: 1;
+  overflow: auto;
+}
+
+.sim-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-table th,
+.sim-table td {
+  padding: 4px 8px;
+  text-align: right;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  white-space: nowrap;
+}
+
+.sim-table th:first-child,
+.sim-table td:first-child,
+.sim-table th:nth-child(2),
+.sim-table td:nth-child(2) {
+  text-align: left;
+}
+
+.sim-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-panel-solid);
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.sim-table tr:hover td {
+  background: rgba(56, 189, 248, 0.06);
+  cursor: pointer;
+}
+
+.sim-detail {
+  width: 320px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.sim-detail-title {
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sim-chip {
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.sim-chip.watch {
+  color: #fab219;
+}
+
+.sim-chip.critical,
+.sim-chip.overflow {
+  color: #f07272;
+}
+
+.sim-detail-row,
+.sim-part-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+  font-size: 11.5px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.sim-detail-row span,
+.sim-part-row span {
+  color: var(--text-muted);
+}
+
+.sim-detail-row span {
+  white-space: nowrap;
+}
+
+.sim-detail-row strong {
+  text-align: right;
+}
+
+.sim-part-row span {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sim-detail-row strong,
+.sim-part-row strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sim-detail-sub {
+  margin-top: 8px;
+  margin-bottom: 2px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.sim-note {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+@media (max-width: 1500px) {
+  .sim-detail {
+    width: 272px;
+  }
+
+  .sim-kpi {
+    min-width: 112px;
+  }
+
+  .sim-legend {
+    gap: 9px;
+  }
+}

@@ -80,7 +80,8 @@
     }
 
     if (window.DEMO_FACILITIES && window.DEMO_FACILITIES[key]) {
-      document.getElementById("data-source-badge").textContent = "SYNTHETIC DATA";
+      document.getElementById("data-source-badge").textContent =
+        window.DEMO_DATA_MODE === "local" ? "LOCAL DATA (PRIVATE)" : "SYNTHETIC DATA";
       return window.DEMO_FACILITIES[key];
     }
     return null;
@@ -237,16 +238,20 @@
       }
     });
 
-    const scopedBays = ds.bays.filter((b) => state.zone === "ALL" || b.zone === state.zone);
-    const occupiedScoped = scopedBays.filter((b) => b.box_count > 0).length;
-    const occPct = scopedBays.length > 0 ? ((occupiedScoped / scopedBays.length) * 100).toFixed(1) : "0.0";
+    // occupancy = occupied pallet positions / pallet positions of the storage racks in scope
+    const scopedBays = ds.bays.filter(
+      (b) => (state.zone === "ALL" || b.zone === state.zone) && b.in_capacity !== false
+    );
+    const positions = scopedBays.reduce((acc, b) => acc + (b.capacity_boxes || 0), 0);
+    const occupiedScoped = scopedBays.reduce((acc, b) => acc + (b.box_count || 0), 0);
+    const occPct = positions > 0 ? ((occupiedScoped / positions) * 100).toFixed(1) : "0.0";
     const avgTurn = totalBoxes > 0 ? (turnoverSum / totalBoxes).toFixed(1) : "0.0";
 
     const agingBoxesInScope = filterActive && state.ageTier !== "ALL" ? totalBoxes : critCount;
     const agingShare = totalBoxes > 0 ? ((critCount / Math.max(1, critCount + warnCount + normCount)) * 100).toFixed(1) : "0.0";
 
     document.getElementById("kpi-total-qty").textContent = totalQty.toLocaleString();
-    document.getElementById("kpi-total-boxes").textContent = `${totalBoxes.toLocaleString()} boxes`;
+    document.getElementById("kpi-total-boxes").textContent = `${totalBoxes.toLocaleString()} pallets`;
     document.getElementById("kpi-sku-count").textContent = skus.size.toLocaleString();
     document.getElementById("kpi-model-count").textContent = `${models.size} product models`;
     document.getElementById("kpi-occupancy").textContent = `${occPct}%`;
@@ -254,7 +259,7 @@
     document.getElementById("kpi-supplier-count").textContent = suppliers.size.toLocaleString();
     document.getElementById("kpi-avg-turnover").textContent = `Avg turnover: ${avgTurn} d`;
     document.getElementById("kpi-aging-boxes").textContent = agingBoxesInScope.toLocaleString();
-    document.getElementById("kpi-aging-share").textContent = `${agingShare}% of scoped boxes`;
+    document.getElementById("kpi-aging-share").textContent = `${agingShare}% of scoped pallets`;
 
     document.getElementById("count-age-critical").textContent = critCount.toLocaleString();
     document.getElementById("count-age-warning").textContent = warnCount.toLocaleString();
@@ -274,7 +279,8 @@
   }
 
   function renderLegend() {
-    const spec = LEGENDS[state.colorMode] || LEGENDS.occupancy;
+    const weekly = window.DemoCapacity && window.DemoCapacity.legendSpec ? window.DemoCapacity.legendSpec() : null;
+    const spec = weekly || LEGENDS[state.colorMode] || LEGENDS.occupancy;
     document.getElementById("legend-title").textContent = spec.title;
     const listEl = document.getElementById("legend-items");
     listEl.innerHTML = "";
@@ -304,13 +310,13 @@
 
       const head = document.createElement("div");
       head.className = "level-card-head";
-      head.innerHTML = `<span>Level ${lvl}</span><span>${lvlItems.length} box${lvlItems.length === 1 ? "" : "es"}</span>`;
+      head.innerHTML = `<span>Level ${lvl}</span><span>${lvlItems.length} pallet${lvlItems.length === 1 ? "" : "s"}</span>`;
       card.appendChild(head);
 
       if (lvlItems.length === 0) {
         const empty = document.createElement("div");
         empty.className = "level-empty";
-        empty.textContent = "Available empty slot";
+        empty.textContent = "Free pallet position";
         card.appendChild(empty);
       } else {
         lvlItems.forEach((it) => {
@@ -362,9 +368,35 @@
     populateDropdowns(dataset);
     window.DemoViewer.loadFacility(dataset);
     refreshDashboard();
+    if (window.DemoCapacity) window.DemoCapacity.refreshView();
+  }
+
+  /** Facility buttons follow the loaded datasets (a local layout may name its own facilities). */
+  function buildFacilityToggle() {
+    const keys = window.DEMO_FACILITIES ? Object.keys(window.DEMO_FACILITIES) : [];
+    const toggle = document.querySelector(".segmented-toggle");
+    if (!keys.length || !toggle) return;
+    const same = keys.length === toggle.querySelectorAll("[data-facility]").length &&
+      keys.every((k) => toggle.querySelector(`[data-facility="${CSS.escape(k)}"]`));
+    if (same) return;
+    toggle.innerHTML = "";
+    keys.forEach((k, i) => {
+      const btn = document.createElement("button");
+      btn.className = `seg-btn${i === 0 ? " active" : ""}`;
+      btn.dataset.facility = k;
+      btn.textContent = window.DEMO_FACILITIES[k].facility_name || k;
+      toggle.appendChild(btn);
+    });
+    toggle.style.gridTemplateColumns = `repeat(${Math.min(keys.length, 3)}, 1fr)`;
+  }
+
+  function firstFacilityKey() {
+    const keys = window.DEMO_FACILITIES ? Object.keys(window.DEMO_FACILITIES) : [];
+    return keys.includes("north") || !keys.length ? "north" : keys[0];
   }
 
   function bindUI() {
+    buildFacilityToggle();
     // Facility toggle
     document.querySelectorAll(".seg-btn[data-facility]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -481,6 +513,7 @@
         document.querySelectorAll("#heatmap-buttons .tool-btn").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         state.colorMode = btn.dataset.mode;
+        if (window.DemoCapacity) window.DemoCapacity.showNow();
         refreshDashboard();
       });
     });
@@ -510,12 +543,14 @@
       if (bay) renderBayDrawer(bay);
     },
     getState: () => state,
+    renderLegend: () => renderLegend(),
+    onWeekSelected: () => renderLegend(),
   };
 
   window.addEventListener("DOMContentLoaded", () => {
     const canvas = document.getElementById("three-canvas");
     window.DemoViewer.init(canvas, (bay) => renderBayDrawer(bay));
     bindUI();
-    switchFacility("north");
+    switchFacility(firstFacilityKey());
   });
 })();

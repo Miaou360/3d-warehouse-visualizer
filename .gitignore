@@ -5,6 +5,9 @@
 *.csv
 data/real/
 demo/data/*.json
+# local bundles built from your own exports (tools/build_from_exports.py)
+demo/data/local/
+*.local.js
 
 # Environment and secrets
 .env

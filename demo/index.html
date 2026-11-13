@@ -28,7 +28,7 @@
         <input
           type="text"
           id="global-search"
-          placeholder="Search part (PART-0001), rack (A01), model, supplier..."
+          placeholder="Search part (PART-0001), rack (N04), model, supplier..."
           autocomplete="off"
         />
         <button id="clear-search-btn" class="clear-search-btn hidden" title="Clear search">
@@ -56,7 +56,7 @@
         <div class="kpi-meta">
           <span class="kpi-title">Total Inventory</span>
           <div class="kpi-number" id="kpi-total-qty">0</div>
-          <span class="kpi-sub" id="kpi-total-boxes">0 boxes</span>
+          <span class="kpi-sub" id="kpi-total-boxes">0 pallets</span>
         </div>
       </div>
 
@@ -72,7 +72,7 @@
       <div class="kpi-card glass-panel">
         <div class="kpi-badge kpi-emerald"><i class="fa-solid fa-warehouse"></i></div>
         <div class="kpi-meta">
-          <span class="kpi-title">Bay Occupancy</span>
+          <span class="kpi-title">Rack Occupancy (pallet positions)</span>
           <div class="kpi-number" id="kpi-occupancy">0%</div>
           <div class="occ-bar-track">
             <div class="occ-bar-fill" id="kpi-occupancy-bar" style="width: 0%"></div>
@@ -94,7 +94,7 @@
         <div class="kpi-meta">
           <span class="kpi-title">Aging &gt; 90 Days</span>
           <div class="kpi-number" id="kpi-aging-boxes">0</div>
-          <span class="kpi-sub" id="kpi-aging-share">0.0% of boxes</span>
+          <span class="kpi-sub" id="kpi-aging-share">0.0% of pallets</span>
         </div>
       </div>
     </section>
@@ -220,7 +220,7 @@
         </div>
 
         <div class="stage-hint">
-          Left-drag: Orbit &middot; Right-drag: Pan &middot; Scroll: Zoom &middot; Click Bay: Inspect Levels
+          Left-drag: Orbit &middot; Right-drag: Pan &middot; Scroll: Zoom &middot; Click Bay: Inspect Levels &middot; Weekly view: pick a week below
         </div>
 
         <!-- Hover Tooltip -->
@@ -228,7 +228,7 @@
           <h4 id="tip-bay-id">A01-01</h4>
           <div class="tip-line"><span>Zone</span><strong id="tip-zone">Zone A</strong></div>
           <div class="tip-line"><span>Occupancy</span><strong id="tip-occ">80%</strong></div>
-          <div class="tip-line"><span>Inventory</span><strong id="tip-qty">240 EA (4 boxes)</strong></div>
+          <div class="tip-line"><span>Inventory</span><strong id="tip-qty">240 pcs</strong></div>
           <div class="tip-line"><span>Max Age</span><strong id="tip-age">18 days</strong></div>
         </div>
 
@@ -263,6 +263,75 @@
         </aside>
       </section>
     </main>
+
+    <!-- Weekly Space Simulation dock -->
+    <section class="sim-dock glass-panel" id="sim-dock" aria-label="Weekly space simulation">
+      <div class="sim-head">
+        <div class="sim-title">
+          <button class="sim-collapse" id="sim-collapse" title="Collapse / expand"><i class="fa-solid fa-chevron-down"></i></button>
+          <div>
+            <h2><i class="fa-solid fa-chart-column"></i> Weekly Space Simulation</h2>
+            <p>Inbound = OMS orders &divide; pallet qty (rounded up) &middot; Outbound = customer forecast &times; BOM, FIFO &middot; whole warehouse, free location</p>
+          </div>
+        </div>
+        <div class="sim-actions">
+          <button class="tool-btn" id="sim-table-btn" title="Show the numbers as a table"><i class="fa-solid fa-table"></i> Table</button>
+          <button class="tool-btn" id="sim-play" title="Step through the weeks"><i class="fa-solid fa-play"></i> Play</button>
+        </div>
+        <div class="sim-kpis">
+          <div class="sim-kpi"><span>Now</span><strong id="sim-kpi-now">--</strong><em id="sim-kpi-now-sub"></em></div>
+          <div class="sim-kpi"><span>Worst mid-week peak</span><strong id="sim-kpi-worst">--</strong><em id="sim-kpi-worst-sub"></em></div>
+          <div class="sim-kpi"><span>First week &ge; 85%</span><strong id="sim-kpi-first">--</strong><em id="sim-kpi-first-sub"></em></div>
+          <div class="sim-kpi"><span>Max overflow</span><strong id="sim-kpi-overflow">--</strong><em id="sim-kpi-overflow-sub"></em></div>
+        </div>
+      </div>
+      <div class="sim-controls">
+        <label class="sim-ctl" title="Customer forecast scenario (100% = as received)">Forecast
+          <input type="range" id="sim-forecast" min="70" max="130" step="5" value="100" />
+          <b id="sim-forecast-val">100%</b>
+        </label>
+        <label class="sim-ctl">Deliveries
+          <select id="sim-shift" class="select-input">
+            <option value="0" selected>As planned (OMS)</option>
+            <option value="-1">1 week early</option>
+            <option value="1">1 week late</option>
+          </select>
+        </label>
+        <label class="sim-ctl" title="When the week's deliveries arrive">Arrivals
+          <select id="sim-timing" class="select-input">
+            <option value="spread" selected>Spread (delivery days)</option>
+            <option value="front">All Monday (worst case)</option>
+          </select>
+        </label>
+        <label class="sim-ctl">Production
+          <select id="sim-prod" class="select-input">
+            <option value="5" selected>Mon&ndash;Fri</option>
+            <option value="6">Mon&ndash;Sat</option>
+          </select>
+        </label>
+        <label class="sim-ctl" title="Temporary floor positions added to the rack capacity">Extra floor
+          <select id="sim-extra" class="select-input">
+            <option value="0" selected>None</option>
+            <option value="100">+100 positions</option>
+            <option value="200">+200 positions</option>
+          </select>
+        </label>
+        <div class="sim-legend">
+          <span><i class="sw sw-bar"></i>Week end</span>
+          <span><i class="sw sw-peak"></i>Mid-week peak</span>
+          <span><b class="st-watch">&#9888;</b> Watch &ge; 85%</span>
+          <span><b class="st-crit">&#9940;</b> Critical &ge; 95%</span>
+        </div>
+      </div>
+      <div class="sim-body">
+        <div class="sim-chart-wrap">
+          <div class="sim-chart" id="sim-chart"></div>
+          <div class="sim-table hidden" id="sim-table"></div>
+          <div class="sim-tip hidden" id="sim-tip"></div>
+        </div>
+        <aside class="sim-detail" id="sim-detail"></aside>
+      </div>
+    </section>
   </div>
 
   <!-- Vendor Libraries -->
@@ -270,12 +339,22 @@
   <script src="vendor/OrbitControls.js"></script>
   <script src="vendor/gsap.min.js"></script>
 
-  <!-- Synthetic Facility Datasets -->
-  <script src="data/facility_north.js"></script>
-  <script src="data/facility_south.js"></script>
+  <!-- Datasets: the synthetic bundles in data/ by default. ?data=local loads your own git-ignored bundles from
+       data/local/ (built by tools/build_from_exports.py). manifest.js lists the files of a data folder. -->
+  <script>
+    window.DEMO_DATA_BASE = /[?&]data=local(&|$)/.test(window.location.search) ? "data/local/" : "data/";
+    document.write('<script src="' + window.DEMO_DATA_BASE + 'manifest.js"><\/script>');
+  </script>
+  <script>
+    (window.DEMO_DATA_FILES || ["facility_north.js", "facility_south.js", "planning.js"]).forEach(function (f) {
+      if (/^[\w.-]+\.js$/.test(f)) document.write('<script src="' + window.DEMO_DATA_BASE + f + '"><\/script>');
+    });
+  </script>
 
   <!-- Application Modules -->
   <script src="viewer3d.js"></script>
+  <script src="sim_engine.js"></script>
   <script src="app.js"></script>
+  <script src="capacity.js"></script>
 </body>
 </html>

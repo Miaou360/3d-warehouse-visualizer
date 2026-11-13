@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.generate_fake_data import DEFAULT_SEED, build_all_facilities  # noqa: E402
+from tools.generate_fake_data import DEFAULT_SEED, build_all  # noqa: E402
 
 DEMO_DIR = Path(os.getenv("DEMO_STATIC_DIR", str(REPO_ROOT / "demo"))).resolve()
 SYNTHETIC_SEED = int(os.getenv("DEMO_SYNTHETIC_SEED", str(DEFAULT_SEED)))
@@ -31,7 +31,9 @@ app = FastAPI(
     description="Synthetic warehouse layout and bin-level inventory API for the 3D WebGL demo.",
 )
 
-_DATASETS: dict[str, dict[str, Any]] = build_all_facilities(base_seed=SYNTHETIC_SEED)
+_ALL = build_all(base_seed=SYNTHETIC_SEED)
+_DATASETS: dict[str, dict[str, Any]] = _ALL["facilities"]
+_PLANNING: dict[str, Any] = _ALL["planning"]
 
 
 @app.get("/api/health")
@@ -65,6 +67,12 @@ def get_inventory(
     if key not in _DATASETS:
         raise HTTPException(status_code=404, detail=f"Unknown facility '{facility}'")
     return _DATASETS[key]
+
+
+@app.get("/api/planning")
+def get_planning() -> dict[str, Any]:
+    """Weeks, parts (pallet quantities), BOM, customer forecast and OMS inbound plan for the weekly simulation."""
+    return _PLANNING
 
 
 @app.get("/")
