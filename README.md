@@ -20,8 +20,8 @@ An interactive WebGL digital-twin prototype for exploring rack-level warehouse i
   - Multi-level high-bay steel racks, floor staging lanes, and special inspection zones rendered with **Three.js (`r128`)**.
   - Smooth **GSAP** camera transitions between **3D Orbit** and **2D Top-Down** views.
   - **Pallet-unit KPI cards**: total racks (rack lines), total bins (pallet positions), occupancy, bins in use, and average stock age. They follow the 3D view — the snapshot (with the filters applied) or the projected week selected in the simulation dock.
-  - **Light by design**: racks, beams, and pallets are three instanced meshes; frames are drawn only when something changes (camera, repaint, resize), with no shadow pass, Lambert materials, and the pixel ratio capped at 1.5 — playable on an office laptop.
-  - **Four Real-Time Heatmap Modes**:
+  - **Light by design**: the data loads once with the page; filters, modes, and weeks only repaint. Racks, beams, and pallets are three instanced meshes; frames are drawn only when something changes (camera, repaint, resize), with no shadow pass, no backdrop blur, Lambert materials, and the pixel ratio capped at 1.5. While the camera moves on a slow device the resolution steps down and returns when it rests. Browsers drawing WebGL without a GPU (remote desktops, VMs) get a **lite mode** automatically — no MSAA, no fog, one device pixel per CSS pixel; `?quality=lite` / `?quality=high` override the detection.
+  - **Four Real-Time Heatmap Modes** (the **Mode** toolbar). The legend doubles as a filter: untick a category to hide those pallets in 3D and in the KPI cards (counts per category beside each row):
     - **Occupancy**: Highlights high-density (`>= 85%`), balanced (`50-84%`), and open (`< 50%`) bays.
     - **Stock Aging**: Flags critical (`> 90 days`), warning (`31-90 days`), and normal (`<= 30 days`) inventory tiers.
     - **Turnover**: Contrasts fast-moving (`<= 15 days`), moderate (`16-38 days`), and slow-moving (`> 38 days`) stock.
@@ -36,7 +36,7 @@ An interactive WebGL digital-twin prototype for exploring rack-level warehouse i
   - **Whole warehouse, free location**: all rack positions form one pool; new pallets take any free position.
   - **Mid-week peak**: deliveries land before production frees space, so every week shows its week-end occupancy (bar) **and** its highest daily occupancy (tick). The bar itself turns **orange** when the week's peak reaches `85 %` (`⚠ watch`) and **red** at `95 %` or when pallets overflow the racks (`⛔ critical / overflow`), so risky weeks stand out at a glance.
   - **Click a week** to project its end-of-week stock into the 3D racks: pallets still from the snapshot, received in earlier weeks, received in that week, and held sub-assembly / finished-goods pallets. **Play** steps through the weeks.
-  - **What-if controls**: customer forecast 70–130 %, deliveries one week early / late, arrivals spread vs. all on Monday, Mon–Sat production, temporary extra floor positions. KPIs (now, worst mid-week peak, first week ≥ 85 %, max overflow), hover tooltips, a table view, and a per-week detail panel (fastest-growing parts, parts that would run short).
+  - **What-if controls**: customer forecast 70–130 %, deliveries one week early / late, arrivals spread vs. all on Monday, Mon–Sat production, and the number of extra floor positions you can lay out. Weeks are labelled by their Monday (`11/16 week`). KPIs (now, worst mid-week peak, first week ≥ 85 %, max overflow), hover tooltips, a table view, and a per-week detail panel (fastest-growing parts, parts that would run short).
   - The synthetic plan includes a short Christmas week, a shutdown week with a holiday build-ahead, and a new model launch, so the demo shows a critical peak in `W52` and watch weeks before the launch.
 
 - **3D Inbound Flow Simulator (`demo/simulation.html`)**

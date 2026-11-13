@@ -39,6 +39,16 @@
     return { facilities: window.DEMO_FACILITIES || {}, planning: window.DEMO_PLANNING };
   }
 
+  /** "11/16 week" = the week starting Monday 11/16 (shown instead of ISO week numbers). */
+  function wkName(w, short) {
+    const [, m, d] = String(w.start).split("-");
+    return short ? `${m}/${d}` : `${m}/${d} week`;
+  }
+
+  function weekByLabel(label) {
+    return state.result ? state.result.weeks.find((w) => w.label === label) : null;
+  }
+
   function weekDates(w) {
     const start = new Date(`${w.start}T00:00:00`);
     const end = new Date(start.getTime() + 6 * 86400000);
@@ -95,9 +105,11 @@
     $("sim-kpi-now").textContent = pct(r.start.pct);
     $("sim-kpi-now-sub").textContent = `${fmt(r.start.pallets)} / ${fmt(r.capacity)} pallet positions`;
     $("sim-kpi-worst").textContent = worst ? pct(worst.peakPct) : "--";
-    $("sim-kpi-worst-sub").textContent = worst ? `${worst.label} mid-week peak (${DAY_NAMES[worst.peakDay] || "start"})` : "";
-    $("sim-kpi-first").textContent = s.firstWatchWeek || "None";
-    $("sim-kpi-first-sub").textContent = s.firstCriticalWeek ? `critical from ${s.firstCriticalWeek}` : "no critical week";
+    $("sim-kpi-worst-sub").textContent = worst ? `${wkName(worst)} · mid-week peak (${DAY_NAMES[worst.peakDay] || "start"})` : "";
+    const firstWatch = weekByLabel(s.firstWatchWeek);
+    const firstCrit = weekByLabel(s.firstCriticalWeek);
+    $("sim-kpi-first").textContent = firstWatch ? wkName(firstWatch) : "None";
+    $("sim-kpi-first-sub").textContent = firstCrit ? `critical from the ${wkName(firstCrit)}` : "no critical week";
     $("sim-kpi-overflow").textContent = fmt(maxOverflow);
     $("sim-kpi-overflow-sub").textContent = maxOverflow > 0 ? "pallets without a position" : "every pallet fits";
   }
@@ -154,7 +166,7 @@
       const wi = c.now ? -1 : c.index;
       const spoken = c.now
         ? `Now: ${pct(c.endPct)} occupied`
-        : `${c.label}: week end ${pct(c.endPct)}, mid-week peak ${pct(c.peakPct)}` +
+        : `${wkName(c)}: week end ${pct(c.endPct)}, mid-week peak ${pct(c.peakPct)}` +
           `${STATUS[c.risk] ? `, ${STATUS[c.risk].label}` : ""}, ${c.inboundPallets} pallets in, ${c.freedPallets} freed`;
       const g = el("g", { class: `sim-col${state.selected === wi ? " selected" : ""}`, tabindex: 0, "data-week": wi,
         role: "button", "aria-label": spoken });
@@ -183,7 +195,8 @@
         }
         g.appendChild(t);
       }
-      g.appendChild(el("text", { x, y: H - pad.b + 13, class: "sim-xlab", "text-anchor": "middle" }, c.label));
+      g.appendChild(el("text", { x, y: H - pad.b + 13, class: "sim-xlab", "text-anchor": "middle" },
+        c.now ? "Now" : wkName(c, band < 66)));
       if (compact) {
         // the tooltip and the table carry the inbound / freed numbers
       } else if (c.now) {
@@ -217,7 +230,7 @@
     tip.innerHTML = "";
     const head = document.createElement("div");
     head.className = "sim-tip-head";
-    head.textContent = c.now ? "Now (snapshot)" : `${c.label} · ${weekDates(data().planning.weeks[c.index])}`;
+    head.textContent = c.now ? "Now (snapshot)" : `${wkName(c)} · ${weekDates(data().planning.weeks[c.index])}`;
     tip.appendChild(head);
     const rows = c.now
       ? [["Occupied", `${pct(c.endPct)}`]]
@@ -267,7 +280,7 @@
       const tr = document.createElement("tr");
       const st = STATUS[w.risk];
       [
-        w.label,
+        wkName(w),
         weekDates(data().planning.weeks[w.index]),
         pct(w.startPct),
         pct(w.endPct),
@@ -332,7 +345,7 @@
     } else {
       const w = r.weeks[state.selected];
       const st = STATUS[w.risk];
-      title.textContent = `${w.label} · ${weekDates(data().planning.weeks[w.index])}`;
+      title.textContent = `${wkName(w)} · ${weekDates(data().planning.weeks[w.index])}`;
       if (st) {
         const chip = document.createElement("span");
         chip.className = `sim-chip ${w.risk}`;
@@ -425,9 +438,19 @@
       state.options.prodDaysPerWeek = ev.target.value === "6" ? 6 : null;
       run();
     });
-    $("sim-extra").addEventListener("change", (ev) => {
-      state.options.extraPositions = Number(ev.target.value);
+    const extra = $("sim-extra");
+    let extraTimer = null;
+    const applyExtra = () => {
+      const v = Math.max(0, Math.min(5000, Math.round(Number(extra.value) || 0)));
+      if (String(v) !== extra.value) extra.value = String(v);
+      if (v === state.options.extraPositions) return;
+      state.options.extraPositions = v;
       run();
+    };
+    extra.addEventListener("change", applyExtra);
+    extra.addEventListener("input", () => {
+      clearTimeout(extraTimer);
+      extraTimer = setTimeout(applyExtra, 600);
     });
     $("sim-play").addEventListener("click", togglePlay);
     $("sim-table-btn").addEventListener("click", () => {
@@ -471,17 +494,17 @@
       if (!state.result || state.selected < 0) return null;
       const w = state.result.weeks[state.selected];
       return {
-        title: `${w.label} projection (end of week)`,
+        title: `${wkName(w)} projection (end of week)`,
         rows: [
-          { color: "#3987e5", label: "In stock at the snapshot" },
-          { color: "#199e70", label: "Received in an earlier week" },
-          { color: "#8af5d0", label: `Received in ${w.label}` },
-          { color: "#64748b", label: "Sub-assembly / finished goods (held)" },
+          { key: "kept", color: "#3987e5", label: "In stock at the snapshot" },
+          { key: "arrived", color: "#199e70", label: "Received in an earlier week" },
+          { key: "week", color: "#8af5d0", label: `Received in the ${wkName(w)}` },
+          { key: "fixed", color: "#64748b", label: "Sub-assembly / finished goods (held)" },
         ],
       };
     },
     weekLabel() {
-      return state.result && state.selected >= 0 ? state.result.weeks[state.selected].label : "now";
+      return state.result && state.selected >= 0 ? wkName(state.result.weeks[state.selected]) : "now";
     },
     showNow() {
       stopPlay();
@@ -491,7 +514,7 @@
     /** Selected week's projected pallets of one facility for the top cards, or null when the snapshot is shown. */
     projection(facilityKey) {
       if (!state.result || state.selected < 0) return null;
-      return { label: state.result.weeks[state.selected].label, map: positionStates(state.selected, facilityKey) };
+      return { label: wkName(state.result.weeks[state.selected]), map: positionStates(state.selected, facilityKey) };
     },
     getResult: () => state.result,
     run,

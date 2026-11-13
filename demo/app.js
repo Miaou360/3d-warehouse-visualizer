@@ -9,34 +9,34 @@
     occupancy: {
       title: "Occupancy Heatmap",
       rows: [
-        { color: "#f43f5e", label: "High Density (>= 85%)" },
-        { color: "#38bdf8", label: "Balanced (50% - 84%)" },
-        { color: "#10b981", label: "Available (< 50%)" },
+        { key: "high", color: "#f43f5e", label: "High Density (>= 85%)" },
+        { key: "medium", color: "#38bdf8", label: "Balanced (50% - 84%)" },
+        { key: "low", color: "#10b981", label: "Available (< 50%)" },
       ],
     },
     aging: {
       title: "Stock Aging Tier",
       rows: [
-        { color: "#f43f5e", label: "Critical (> 90 Days)" },
-        { color: "#f59e0b", label: "Warning (31 - 90 Days)" },
-        { color: "#10b981", label: "Normal (<= 30 Days)" },
+        { key: "critical", color: "#f43f5e", label: "Critical (> 90 Days)" },
+        { key: "warning", color: "#f59e0b", label: "Warning (31 - 90 Days)" },
+        { key: "normal", color: "#10b981", label: "Normal (<= 30 Days)" },
       ],
     },
     turnover: {
       title: "Inventory Turnover",
       rows: [
-        { color: "#10b981", label: "Fast Moving (<= 15 days)" },
-        { color: "#38bdf8", label: "Moderate (16 - 38 days)" },
-        { color: "#a855f7", label: "Slow Moving (> 38 days)" },
+        { key: "fast", color: "#10b981", label: "Fast Moving (<= 15 days)" },
+        { key: "moderate", color: "#38bdf8", label: "Moderate (16 - 38 days)" },
+        { key: "slow", color: "#a855f7", label: "Slow Moving (> 38 days)" },
       ],
     },
     material: {
       title: "Material Category",
       rows: [
-        { color: "#38bdf8", label: "ROH1 - Raw Component A" },
-        { color: "#818cf8", label: "ROH2 - Raw Component B" },
-        { color: "#f59e0b", label: "HALB - Sub-Assembly" },
-        { color: "#10b981", label: "FERT - Finished Module" },
+        { key: "ROH1", color: "#38bdf8", label: "ROH1 - Raw Component A" },
+        { key: "ROH2", color: "#818cf8", label: "ROH2 - Raw Component B" },
+        { key: "HALB", color: "#f59e0b", label: "HALB - Sub-Assembly" },
+        { key: "FERT", color: "#10b981", label: "FERT - Finished Module" },
       ],
     },
   };
@@ -46,6 +46,7 @@
     dataset: null,
     searchQuery: "",
     zone: "ALL",
+    legendHidden: {}, // legend categories switched off, per colour mode and 'forecast' (weekly view)
     model: "ALL",
     supplier: "ALL",
     supplierFilterText: "",
@@ -261,9 +262,11 @@
     let note = "";
     let occupiedAll = scoped.reduce((acc, b) => acc + (b.box_count || 0), 0); // for the free count under filters
     const proj = window.DemoCapacity && window.DemoCapacity.projection ? window.DemoCapacity.projection(state.facilityKey) : null;
+    const legendOff = (state.legendHidden[proj ? "forecast" : state.colorMode] || new Set()).size > 0;
     if (proj) {
       proj.map.forEach((st, key) => {
         if (!scopedIds.has(key.slice(0, key.indexOf(":")))) return;
+        if (window.DemoViewer.isHidden("forecast", st.status)) return;
         used += 1;
         ageSum += st.age;
         if (st.age > 90) over90 += 1;
@@ -275,6 +278,7 @@
       scoped.forEach((bay) => {
         (bay.items || []).forEach((it) => {
           if (filtered && !itemMatchesFilters(it, bay)) return;
+          if (legendOff && window.DemoViewer.isHidden(state.colorMode, window.DemoViewer.categoryOf(it, bay, state.colorMode))) return;
           used += 1;
           ageSum += it.age_days;
           if (it.age_days > 90) over90 += 1;
@@ -282,6 +286,7 @@
       });
       note = filtered ? "matching the filters" : "snapshot";
     }
+    if (legendOff) note += " · legend filter";
     const occ = bins > 0 ? (used / bins) * 100 : 0;
     const fmt = (n) => n.toLocaleString();
     document.getElementById("kpi-racks").textContent = fmt(racks);
@@ -301,18 +306,44 @@
     document.getElementById("kpi-age-sub").textContent = `per pallet in use · ${fmt(over90)} over 90 d`;
   }
 
+  /** Legend = filter: each row has a check box; unticking hides that category in 3D and in the cards. */
   function renderLegend() {
     const weekly = window.DemoCapacity && window.DemoCapacity.legendSpec ? window.DemoCapacity.legendSpec() : null;
     const spec = weekly || LEGENDS[state.colorMode] || LEGENDS.occupancy;
+    const group = weekly ? "forecast" : state.colorMode;
+    const counts = window.DemoViewer.getCategoryCounts ? window.DemoViewer.getCategoryCounts() : {};
     document.getElementById("legend-title").textContent = spec.title;
     const listEl = document.getElementById("legend-items");
-    listEl.innerHTML = "";
+    listEl.textContent = "";
     spec.rows.forEach((row) => {
-      const div = document.createElement("div");
-      div.className = "legend-row";
-      div.innerHTML = `<span class="legend-swatch" style="background:${row.color}"></span><span>${row.label}</span>`;
-      listEl.appendChild(div);
+      const label = document.createElement("label");
+      label.className = "legend-row";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = !window.DemoViewer.isHidden(group, row.key);
+      box.addEventListener("change", () => toggleCategory(group, row.key, !box.checked));
+      const sw = document.createElement("span");
+      sw.className = "legend-swatch";
+      sw.style.background = row.color;
+      const text = document.createElement("span");
+      text.className = "legend-label";
+      text.textContent = row.label;
+      const n = document.createElement("span");
+      n.className = "legend-count";
+      n.textContent = (counts[row.key] || 0).toLocaleString();
+      label.append(box, sw, text, n);
+      listEl.appendChild(label);
     });
+  }
+
+  function toggleCategory(group, key, hide) {
+    const hidden = state.legendHidden[group] || new Set();
+    if (hide) hidden.add(key);
+    else hidden.delete(key);
+    state.legendHidden[group] = hidden;
+    window.DemoViewer.setHiddenCategories(group, [...hidden]);
+    renderLegend();
+    renderKpiCards();
   }
 
   function renderBayDrawer(bay) {

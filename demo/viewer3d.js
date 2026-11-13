@@ -40,6 +40,27 @@
   };
   const DIM = 0x1e293b;
 
+  /** 'lite' when the browser draws WebGL without a GPU (SwiftShader / WARP / llvmpipe: common on office PCs,
+   *  remote desktops and VMs) or ?quality=lite; 'high' otherwise or with ?quality=high. */
+  function detectQuality() {
+    const q = (window.location.search.match(/[?&]quality=(lite|high)/) || [])[1];
+    if (q) return { mode: q, renderer: "url override" };
+    try {
+      const c = document.createElement("canvas");
+      const gl = c.getContext("webgl") || c.getContext("experimental-webgl");
+      if (!gl) return { mode: "lite", renderer: "no WebGL" };
+      const ext = gl.getExtension("WEBGL_debug_renderer_info");
+      const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+      const lose = gl.getExtension("WEBGL_lose_context");
+      if (lose) lose.loseContext();
+      const soft = /swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic/i.test(name);
+      return { mode: soft ? "lite" : "high", renderer: name };
+    } catch (e) {
+      return { mode: "high", renderer: "unknown" };
+    }
+  }
+  const QUALITY = detectQuality();
+
   const ZONE_TINTS = {
     "Zone A": "#38bdf8",
     "Zone B": "#818cf8",
@@ -67,6 +88,10 @@
   let hitProxies = [];
   let bayVisualMap = new Map();
   let palletMesh = null; // InstancedMesh, one instance per position slot
+  const hiddenByGroup = {}; // legend categories switched off, per colour mode and for the weekly view ('forecast')
+  const NONE = new Set();
+  let categoryCounts = {}; // pallets per legend category in the last paint
+  const res = { base: 1, cur: 1, min: 0.6, changed: 0 }; // render resolution (pixel ratio)
   let slotRecords = []; // instance index -> { bay, level, slot, item, matrix, key }
   let forecastState = null; // Map positionKey -> { status, part } while the weekly view is on
   let currentMode = "occupancy";
@@ -87,7 +112,7 @@
 
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x090f1d);
-    scene.fog = new THREE.FogExp2(0x090f1d, 0.0031);
+    if (QUALITY.mode !== "lite") scene.fog = new THREE.FogExp2(0x090f1d, 0.0031);
 
     const aspect = Math.max(1, wrapper.clientWidth) / Math.max(1, wrapper.clientHeight);
     camera = new THREE.PerspectiveCamera(45, aspect, 0.5, 600);
@@ -95,13 +120,19 @@
 
     // Light by design (playable on office laptops): pixel ratio capped at 1.5, MSAA only on standard-density
     // screens, no shadow pass, Lambert materials, and frames are drawn only when something changed (see animate)
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    // lite (no GPU): no MSAA, one device pixel per CSS pixel at most, and a lower resolution while moving
+    const lite = QUALITY.mode === "lite";
+    const dpr = lite ? Math.min(window.devicePixelRatio || 1, 1) : Math.min(window.devicePixelRatio || 1, 1.5);
     renderer = new THREE.WebGLRenderer({
       canvas: canvasEl,
-      antialias: dpr < 1.5,
+      antialias: !lite && dpr < 1.5,
       powerPreference: "high-performance",
     });
     renderer.setPixelRatio(dpr);
+    res.base = dpr;
+    res.cur = dpr;
+    res.min = lite ? 0.45 : 0.6;
+    document.documentElement.dataset.quality = QUALITY.mode;
     renderer.setSize(wrapper.clientWidth, wrapper.clientHeight);
     renderer.shadowMap.enabled = false;
 
@@ -352,56 +383,66 @@
     paint();
   }
 
-  function resolveItemColor(item, bay, mode) {
-    if (mode === "occupancy") {
-      if (bay.occupancy_pct >= 85) return PALETTES.occupancy.high;
-      if (bay.occupancy_pct >= 50) return PALETTES.occupancy.medium;
-      return PALETTES.occupancy.low;
-    }
-    if (mode === "aging") {
-      if (item.age_days > 90) return PALETTES.aging.critical;
-      if (item.age_days > 30) return PALETTES.aging.warning;
-      return PALETTES.aging.normal;
-    }
-    if (mode === "turnover") {
-      if (item.turnover_days <= 15) return PALETTES.turnover.fast;
-      if (item.turnover_days <= 38) return PALETTES.turnover.moderate;
-      return PALETTES.turnover.slow;
-    }
-    if (mode === "material") return PALETTES.material[item.material_type] || PALETTES.material.OTHER;
-    return 0x38bdf8;
+  /** Legend category of a snapshot pallet in a colour mode (the keys of PALETTES[mode]). */
+  function categoryOf(item, bay, mode) {
+    if (mode === "occupancy") return bay.occupancy_pct >= 85 ? "high" : bay.occupancy_pct >= 50 ? "medium" : "low";
+    if (mode === "aging") return item.age_days > 90 ? "critical" : item.age_days > 30 ? "warning" : "normal";
+    if (mode === "turnover") return item.turnover_days <= 15 ? "fast" : item.turnover_days <= 38 ? "moderate" : "slow";
+    if (mode === "material") return PALETTES.material[item.material_type] !== undefined ? item.material_type : "OTHER";
+    return "";
   }
 
-  /** Draw every slot: snapshot pallets (filters + color mode) or the projected week (weekly view). */
+  /** Draw every slot: snapshot pallets (filters + color mode) or the projected week (weekly view).
+   *  Legend categories switched off (setHiddenCategories) are not drawn; counts per category are kept. */
   function paint() {
     if (!palletMesh) return;
     const filterBays = lastFilter.bays;
     const filterItems = lastFilter.items;
+    const counts = {};
+    const hiddenCats = hiddenByGroup[forecastState ? "forecast" : currentMode] || NONE;
     slotRecords.forEach((rec, i) => {
       let show = false;
       let hex = DIM;
       if (forecastState && rec.bay.in_capacity !== false) {
         const st = forecastState.get(rec.key);
         if (st) {
-          show = true;
-          hex = PALETTES.forecast[st.status] !== undefined ? PALETTES.forecast[st.status] : PALETTES.forecast.arrived;
+          const key = PALETTES.forecast[st.status] !== undefined ? st.status : "arrived";
+          counts[key] = (counts[key] || 0) + 1;
+          show = !hiddenCats.has(key);
+          hex = PALETTES.forecast[key];
         }
       } else if (rec.item) {
         show = true;
         if (forecastState) {
           hex = PALETTES.forecast.fixed;
+          show = !hiddenCats.has("fixed");
         } else {
           const active =
             (!filterBays || filterBays.has(rec.bay.bay_id)) && (!filterItems || filterItems.has(rec.item.box_id));
-          hex = active ? resolveItemColor(rec.item, rec.bay, currentMode) : DIM;
+          const key = categoryOf(rec.item, rec.bay, currentMode);
+          if (active) counts[key] = (counts[key] || 0) + 1;
+          hex = active ? PALETTES[currentMode][key] : DIM;
+          show = !hiddenCats.has(key);
         }
       }
       palletMesh.setMatrixAt(i, show ? rec.matrix : HIDDEN);
       palletMesh.setColorAt(i, tmpColor.setHex(hex));
     });
+    categoryCounts = counts;
     palletMesh.instanceMatrix.needsUpdate = true;
     if (palletMesh.instanceColor) palletMesh.instanceColor.needsUpdate = true;
     requestRender();
+  }
+
+  /** Legend check boxes: group = colour mode ('occupancy', 'aging', 'turnover', 'material') or 'forecast'
+   *  (weekly view); keys = PALETTES[group] keys to hide. */
+  function setHiddenCategories(group, keys) {
+    hiddenByGroup[group] = new Set(keys || []);
+    paint();
+  }
+
+  function isHidden(group, key) {
+    return !!(hiddenByGroup[group] && hiddenByGroup[group].has(key));
   }
 
   function applyState(matchedBayIds, matchedItemSet, colorMode) {
@@ -566,17 +607,40 @@
     needsRender = true;
   }
 
-  function animate() {
+  // Adaptive resolution: while the camera moves and frames come slower than ~25 fps, draw fewer pixels;
+  // once it rests, draw one frame at full resolution again.
+  let lastFrameT = 0;
+  let restFrames = 0;
+  function animate(t) {
     requestAnimationFrame(animate);
+    if (!renderer || !scene || !camera) return;
     const moving = controls ? controls.update() : false;
-    if ((moving || needsRender) && renderer && scene && camera) {
+    if (moving || needsRender) {
+      if (moving && lastFrameT && t - lastFrameT > 40 && res.cur > res.min && t - res.changed > 250) {
+        res.cur = Math.max(res.min, res.cur * 0.75);
+        res.changed = t;
+        renderer.setPixelRatio(res.cur);
+      }
       needsRender = false;
+      restFrames = 0;
       renderer.render(scene, camera);
+      lastFrameT = t;
+    } else if (res.cur < res.base && ++restFrames > 8) {
+      res.cur = res.base;
+      renderer.setPixelRatio(res.cur);
+      renderer.render(scene, camera);
+    } else {
+      lastFrameT = 0;
     }
   }
 
   window.DemoViewer = {
     init,
+    setHiddenCategories,
+    isHidden,
+    categoryOf,
+    getCategoryCounts: () => categoryCounts,
+    quality: QUALITY,
     loadFacility,
     applyState,
     setForecastState,

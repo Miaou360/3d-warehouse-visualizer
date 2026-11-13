@@ -205,7 +205,7 @@
           </div>
 
           <div class="toolbar-group" id="heatmap-buttons">
-            <span class="toolbar-caption">Color Mode</span>
+            <span class="toolbar-caption">Mode</span>
             <button class="tool-btn active" data-mode="occupancy">Occupancy</button>
             <button class="tool-btn" data-mode="aging">Stock Aging</button>
             <button class="tool-btn" data-mode="turnover">Turnover</button>
@@ -216,7 +216,7 @@
         <canvas id="three-canvas"></canvas>
 
         <div class="stage-legend">
-          <div class="legend-header" id="legend-title">Occupancy Heatmap</div>
+          <div class="legend-header"><span id="legend-title">Occupancy Heatmap</span><span class="legend-hint">tick to filter</span></div>
           <div class="legend-list" id="legend-items"></div>
         </div>
 
@@ -287,7 +287,7 @@
         </div>
       </div>
       <div class="sim-controls">
-        <label class="sim-ctl" title="Customer forecast scenario (100% = as received)">Forecast
+        <label class="sim-ctl" title="Customer forecast scenario (100% = as received)">Customer Forecast
           <input type="range" id="sim-forecast" min="70" max="130" step="5" value="100" />
           <b id="sim-forecast-val">100%</b>
         </label>
@@ -310,12 +310,9 @@
             <option value="6">Mon&ndash;Sat</option>
           </select>
         </label>
-        <label class="sim-ctl" title="Temporary floor positions added to the rack capacity">Extra floor
-          <select id="sim-extra" class="select-input">
-            <option value="0" selected>None</option>
-            <option value="100">+100 positions</option>
-            <option value="200">+200 positions</option>
-          </select>
+        <label class="sim-ctl" title="Pallet positions you can lay out on the floor on top of the racks (0 = none)">Extra floor
+          <input type="number" id="sim-extra" class="select-input sim-num" min="0" max="5000" step="10" value="0" inputmode="numeric" aria-label="Extra floor pallet positions" />
+          <span class="sim-unit">positions</span>
         </label>
         <div class="sim-legend">
           <span title="Bar = occupancy at the end of the week; its colour = the week's status (mid-week peak)"><i class="sw sw-bar"></i>Week end</span>
