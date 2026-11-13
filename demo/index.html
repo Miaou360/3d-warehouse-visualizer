@@ -150,34 +150,32 @@
             <button class="pill-btn active" data-mat="ALL">ALL</button>
             <button class="pill-btn" data-mat="ROH1">ROH1</button>
             <button class="pill-btn" data-mat="ROH2">ROH2</button>
-            <button class="pill-btn" data-mat="HALB">HALB</button>
-            <button class="pill-btn" data-mat="FERT">FERT</button>
+            <button class="pill-btn" data-mat="ROH3">ROH3</button>
           </div>
         </div>
 
         <div class="control-block">
-          <label><i class="fa-solid fa-hourglass-half"></i> Stock Aging Tier</label>
+          <label><i class="fa-solid fa-hourglass-half"></i> Stock Age</label>
           <div class="aging-list">
-            <div class="aging-row" data-age="critical">
-              <div class="aging-left">
-                <span class="dot dot-rose"></span>
-                <span>Critical (&gt; 90d)</span>
-              </div>
-              <span class="mini-count" id="count-age-critical">0</span>
+            <div class="aging-row" data-age="d30">
+              <div class="aging-left"><span class="dot age-1"></span><span>&le; 30 days</span></div>
+              <span class="mini-count" id="count-age-d30">0</span>
             </div>
-            <div class="aging-row" data-age="warning">
-              <div class="aging-left">
-                <span class="dot dot-amber"></span>
-                <span>Warning (31-90d)</span>
-              </div>
-              <span class="mini-count" id="count-age-warning">0</span>
+            <div class="aging-row" data-age="d90">
+              <div class="aging-left"><span class="dot age-2"></span><span>31&ndash;90 days</span></div>
+              <span class="mini-count" id="count-age-d90">0</span>
             </div>
-            <div class="aging-row" data-age="normal">
-              <div class="aging-left">
-                <span class="dot dot-emerald"></span>
-                <span>Normal (&le; 30d)</span>
-              </div>
-              <span class="mini-count" id="count-age-normal">0</span>
+            <div class="aging-row" data-age="d180">
+              <div class="aging-left"><span class="dot age-3"></span><span>91&ndash;180 days</span></div>
+              <span class="mini-count" id="count-age-d180">0</span>
+            </div>
+            <div class="aging-row" data-age="d365">
+              <div class="aging-left"><span class="dot age-4"></span><span>181&ndash;365 days</span></div>
+              <span class="mini-count" id="count-age-d365">0</span>
+            </div>
+            <div class="aging-row" data-age="d365p">
+              <div class="aging-left"><span class="dot age-5"></span><span>&gt; 365 days</span></div>
+              <span class="mini-count" id="count-age-d365p">0</span>
             </div>
           </div>
         </div>
@@ -207,7 +205,7 @@
           <div class="toolbar-group" id="heatmap-buttons">
             <span class="toolbar-caption">Mode</span>
             <button class="tool-btn active" data-mode="occupancy">Occupancy</button>
-            <button class="tool-btn" data-mode="aging">Stock Aging</button>
+            <button class="tool-btn" data-mode="aging">Stock Age</button>
             <button class="tool-btn" data-mode="turnover">Turnover</button>
             <button class="tool-btn" data-mode="material">Material Type</button>
           </div>

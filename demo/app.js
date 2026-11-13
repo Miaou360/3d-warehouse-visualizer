@@ -15,11 +15,13 @@
       ],
     },
     aging: {
-      title: "Stock Aging Tier",
+      title: "Stock Age",
       rows: [
-        { key: "critical", color: "#f43f5e", label: "Critical (> 90 Days)" },
-        { key: "warning", color: "#f59e0b", label: "Warning (31 - 90 Days)" },
-        { key: "normal", color: "#10b981", label: "Normal (<= 30 Days)" },
+        { key: "d30", color: "#1c5cab", label: "≤ 30 days" },
+        { key: "d90", color: "#2a78d6", label: "31–90 days" },
+        { key: "d180", color: "#5598e7", label: "91–180 days" },
+        { key: "d365", color: "#86b6ef", label: "181–365 days" },
+        { key: "d365p", color: "#b7d3f6", label: "> 365 days" },
       ],
     },
     turnover: {
@@ -31,15 +33,16 @@
       ],
     },
     material: {
-      title: "Material Category",
+      title: "Material Type",
       rows: [
-        { key: "ROH1", color: "#38bdf8", label: "ROH1 - Raw Component A" },
-        { key: "ROH2", color: "#818cf8", label: "ROH2 - Raw Component B" },
-        { key: "HALB", color: "#f59e0b", label: "HALB - Sub-Assembly" },
-        { key: "FERT", color: "#10b981", label: "FERT - Finished Module" },
+        { key: "ROH1", color: "#3987e5", label: "ROH1" },
+        { key: "ROH2", color: "#d95926", label: "ROH2" },
+        { key: "ROH3", color: "#199e70", label: "ROH3" },
+        { key: "OTHER", color: "#94a3b8", label: "Other / not set", optional: true },
       ],
     },
   };
+  const AGE_KEYS = LEGENDS.aging.rows.map((r) => r.key);
 
   const state = {
     facilityKey: "north",
@@ -93,10 +96,7 @@
     if (state.model !== "ALL" && item.model !== state.model) return false;
     if (state.supplier !== "ALL" && item.supplier_code !== state.supplier) return false;
     if (state.materialType !== "ALL" && item.material_type !== state.materialType) return false;
-
-    if (state.ageTier === "critical" && item.age_days <= 90) return false;
-    if (state.ageTier === "warning" && (item.age_days <= 30 || item.age_days > 90)) return false;
-    if (state.ageTier === "normal" && item.age_days > 30) return false;
+    if (state.ageTier !== "ALL" && window.DemoViewer.ageBucket(item.age_days) !== state.ageTier) return false;
 
     if (state.searchQuery) {
       const q = state.searchQuery.toLowerCase();
@@ -187,9 +187,8 @@
     const matchedBayIds = new Set();
     const matchedItemIds = new Set();
 
-    let critCount = 0;
-    let warnCount = 0;
-    let normCount = 0;
+    const ageCounts = {};
+    AGE_KEYS.forEach((k) => (ageCounts[k] = 0));
 
     ds.bays.forEach((bay) => {
       const items = bay.items || [];
@@ -209,11 +208,7 @@
           (state.supplier === "ALL" || it.supplier_code === state.supplier) &&
           (state.materialType === "ALL" || it.material_type === state.materialType);
 
-        if (baseMatch) {
-          if (it.age_days > 90) critCount++;
-          else if (it.age_days > 30) warnCount++;
-          else normCount++;
-        }
+        if (baseMatch) ageCounts[window.DemoViewer.ageBucket(it.age_days)] += 1;
 
         if (itemMatchesFilters(it, bay)) {
           bayHasMatch = true;
@@ -228,9 +223,10 @@
 
     renderKpiCards();
 
-    document.getElementById("count-age-critical").textContent = critCount.toLocaleString();
-    document.getElementById("count-age-warning").textContent = warnCount.toLocaleString();
-    document.getElementById("count-age-normal").textContent = normCount.toLocaleString();
+    AGE_KEYS.forEach((k) => {
+      const el = document.getElementById(`count-age-${k}`);
+      if (el) el.textContent = ageCounts[k].toLocaleString();
+    });
     document.getElementById("filtered-bay-counter").textContent = `${matchedBayIds.size} / ${ds.bays.length} bays`;
 
     window.DemoViewer.applyState(
@@ -258,7 +254,7 @@
 
     let used = 0;
     let ageSum = 0;
-    let over90 = 0;
+    let aged = 0; // pallets older than 180 days
     let note = "";
     let occupiedAll = scoped.reduce((acc, b) => acc + (b.box_count || 0), 0); // for the free count under filters
     const proj = window.DemoCapacity && window.DemoCapacity.projection ? window.DemoCapacity.projection(state.facilityKey) : null;
@@ -269,7 +265,7 @@
         if (window.DemoViewer.isHidden("forecast", st.status)) return;
         used += 1;
         ageSum += st.age;
-        if (st.age > 90) over90 += 1;
+        if (st.age > 180) aged += 1;
       });
       note = `${proj.label} projection`;
       occupiedAll = used;
@@ -281,7 +277,7 @@
           if (legendOff && window.DemoViewer.isHidden(state.colorMode, window.DemoViewer.categoryOf(it, bay, state.colorMode))) return;
           used += 1;
           ageSum += it.age_days;
-          if (it.age_days > 90) over90 += 1;
+          if (it.age_days > 180) aged += 1;
         });
       });
       note = filtered ? "matching the filters" : "snapshot";
@@ -303,7 +299,7 @@
     document.getElementById("kpi-used").textContent = fmt(used);
     document.getElementById("kpi-used-sub").textContent = `${note} · ${fmt(Math.max(0, bins - occupiedAll))} free`;
     document.getElementById("kpi-age").textContent = `${used ? Math.round(ageSum / used) : 0} d`;
-    document.getElementById("kpi-age-sub").textContent = `per pallet in use · ${fmt(over90)} over 90 d`;
+    document.getElementById("kpi-age-sub").textContent = `per pallet in use · ${fmt(aged)} over 180 d`;
   }
 
   /** Legend = filter: each row has a check box; unticking hides that category in 3D and in the cards. */
@@ -316,6 +312,7 @@
     const listEl = document.getElementById("legend-items");
     listEl.textContent = "";
     spec.rows.forEach((row) => {
+      if (row.optional && !counts[row.key]) return; // e.g. 'Other' material only when such pallets exist
       const label = document.createElement("label");
       label.className = "legend-row";
       const box = document.createElement("input");
@@ -374,7 +371,7 @@
         card.appendChild(empty);
       } else {
         lvlItems.forEach((it) => {
-          const ageClass = it.age_days > 90 ? "tag-crit" : it.age_days > 30 ? "tag-warn" : "tag-normal";
+          const ageClass = `tag-${window.DemoViewer.ageBucket(it.age_days)}`;
           const row = document.createElement("div");
           row.className = "box-item";
           row.innerHTML = `
@@ -385,7 +382,7 @@
             <div class="box-desc">${it.description}</div>
             <div class="box-meta-row">
               <span class="tag ${ageClass}">${it.age_days}d age</span>
-              <span>${it.material_type}</span>
+              <span>${it.material_type || "Other"}</span>
               <span>&middot; ${it.model}</span>
               <span>&middot; ${it.supplier_name}</span>
               <span>&middot; GR ${it.gr_date}</span>
@@ -574,18 +571,18 @@
 
     document.getElementById("drawer-close-btn").addEventListener("click", closeDrawer);
 
-    // Clock
+    // Clock (one formatter: toLocaleString builds a new one on every call)
     const clockEl = document.getElementById("clock-display");
+    const clockFmt = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
     const tickClock = () => {
-      const now = new Date();
-      clockEl.textContent = now.toLocaleString("en-US", {
-        month: "short",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      });
+      clockEl.textContent = clockFmt.format(new Date());
     };
     tickClock();
     setInterval(tickClock, 1000);
@@ -599,8 +596,7 @@
     getState: () => state,
     renderLegend: () => renderLegend(),
     onWeekSelected: () => {
-      renderLegend();
-      renderKpiCards();
+      renderKpiCards(); // the legend was redrawn with the 3D projection already
     },
   };
 

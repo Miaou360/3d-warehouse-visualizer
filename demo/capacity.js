@@ -68,7 +68,17 @@
   }
 
   // ------------------------------------------------------------------ 3D projection
+  // the 3D view and the top cards both read the selected week's positions: build them once per week / facility
+  let statesCache = { result: null, wi: -1, facilityKey: "", map: null };
   function positionStates(wi, facilityKey) {
+    const c = statesCache;
+    if (c.result === state.result && c.wi === wi && c.facilityKey === facilityKey) return c.map;
+    const map = buildPositionStates(wi, facilityKey);
+    statesCache = { result: state.result, wi, facilityKey, map };
+    return map;
+  }
+
+  function buildPositionStates(wi, facilityKey) {
     const r = state.result;
     const snap = r.snapshots[wi];
     const weekStart = r.weeks[wi].startDay;
@@ -499,7 +509,7 @@
           { key: "kept", color: "#3987e5", label: "In stock at the snapshot" },
           { key: "arrived", color: "#199e70", label: "Received in an earlier week" },
           { key: "week", color: "#8af5d0", label: `Received in the ${wkName(w)}` },
-          { key: "fixed", color: "#64748b", label: "Sub-assembly / finished goods (held)" },
+          { key: "fixed", color: "#64748b", label: "Not simulated (staging / hold)" },
         ],
       };
     },
@@ -508,7 +518,7 @@
     },
     showNow() {
       stopPlay();
-      select(-1, true);
+      if (state.selected >= 0) select(-1, true); // already on the snapshot: nothing to repaint
     },
     refreshView: applyToViewer,
     /** Selected week's projected pallets of one facility for the top cards, or null when the snapshot is shown. */

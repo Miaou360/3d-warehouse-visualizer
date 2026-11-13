@@ -15,8 +15,8 @@ Input files (UTF-8 or UTF-8 with BOM, header row, column names case-insensitive)
   oms.csv       part_no, week, qty                     weekly order / delivery quantity per purchased part
   stock.csv     part_no, qty [, pallets, gr_date, description, material_type]
                 one row per pallet, or one row per part with the number of pallets in ``pallets``;
-                rows of parts that are not in parts.csv (sub-assemblies, finished goods) keep their
-                positions for the whole horizon
+                rows of parts that are not in parts.csv keep their positions for the whole horizon
+                (material_type from the row, else shown as "other")
   calendar.csv  week, prod_days, recv_days             optional; weekdays 1-7 (``1 2 3 4 5``), empty = closed
   layout.csv    facility, bay_id, x, z, levels [, rack_id, positions_per_level, zone, in_capacity, name]
                 optional; without it the synthetic 5-level rack layout of the demo is used
@@ -48,6 +48,7 @@ from generate_fake_data import build_layout, facility_specs, pallets_for  # noqa
 DEFAULT_IN = REPO_ROOT / "data" / "real"
 DEFAULT_OUT = REPO_ROOT / "demo" / "data" / "local"
 MON_FRI = [1, 2, 3, 4, 5]
+NO_DEMAND_COVER = 999.0          # turnover (cover days) shown for stock without requirement in the horizon
 
 
 class InputError(ValueError):
@@ -178,7 +179,7 @@ def build(in_dir: Path, weeks_n: int, start_arg: str | None, seed: int) -> dict[
             raise InputError(f"parts.csv line {n}: pallet_qty of {r['part_no']} must be > 0")
         parts[r["part_no"]] = {
             "part_no": r["part_no"], "description": r["description"], "pallet_qty": pq,
-            "material_type": r.get("material_type") or "ROH1", "supplier_code": r.get("supplier_code") or "",
+            "material_type": r.get("material_type") or "", "supplier_code": r.get("supplier_code") or "",
             "supplier_name": r.get("supplier_name") or "", "uom": r.get("uom") or "EA",
             "delivery_days": weekdays(r.get("delivery_days", "")) or None, "model": r.get("model") or "",
         }
@@ -269,12 +270,14 @@ def build(in_dir: Path, weeks_n: int, start_arg: str | None, seed: int) -> dict[
         p = pl["part"]
         r = pl["row"]
         weekly = req_week.get(r["part_no"], 0.0)
-        cover = stock_total.get(r["part_no"], 0.0) / weekly * 7 if weekly > 0 else 0.0
+        cover = NO_DEMAND_COVER
+        if weekly > 0:
+            cover = min(NO_DEMAND_COVER, stock_total.get(r["part_no"], 0.0) / weekly * 7)
         items_by_bay.setdefault((fk, bay["bay_id"]), []).append({
             "box_id": f"PLT-{seq:05d}", "lot_no": "", "level": lvl, "slot": slot,
             "part_no": r["part_no"], "description": (p or {}).get("description") or r.get("description") or "",
             "model": (p or {}).get("model") or top_parent(r["part_no"]),
-            "material_type": (p or {}).get("material_type") or r.get("material_type") or "HALB",
+            "material_type": (p or {}).get("material_type") or r.get("material_type") or "",
             "supplier_code": (p or {}).get("supplier_code") or "", "supplier_name": (p or {}).get("supplier_name") or "",
             "uom": (p or {}).get("uom") or "EA", "simulated": p is not None, "qty": pl["qty"],
             "gr_date": pl["gr"].isoformat(), "age_days": max(0, (snapshot - pl["gr"]).days),

@@ -75,6 +75,41 @@ class GeneratorTest(unittest.TestCase):
         for label, series in DATA["planning"]["oms"].items():
             self.assertEqual(series[[w["label"] for w in DATA["planning"]["weeks"]].index("W53")], 0, label)
 
+    def test_material_warehouse_holds_raw_materials_only(self) -> None:
+        types = {it["material_type"] for f in DATA["facilities"].values() for b in f["bays"] for it in b["items"]}
+        self.assertEqual(types, {"ROH1", "ROH2", "ROH3"})
+        self.assertEqual({p["material_type"] for p in DATA["planning"]["parts"]}, {"ROH1", "ROH2", "ROH3"})
+        rack = [it for f in DATA["facilities"].values() for b in f["bays"] if b["in_capacity"] for it in b["items"]]
+        self.assertTrue(all(it["simulated"] for it in rack), "every rack pallet is a purchased part of the plan")
+
+    def test_age_and_turnover_are_mixed_over_all_racks(self) -> None:
+        def age(d: int) -> str:
+            return "d30" if d <= 30 else "d90" if d <= 90 else "d180" if d <= 180 else "d365" if d <= 365 else "d365p"
+
+        def turn(d: float) -> str:
+            return "fast" if d <= 15 else "moderate" if d <= 38 else "slow"
+
+        for key, fac in DATA["facilities"].items():
+            racks = {b["rack_id"] for b in fac["bays"] if b["in_capacity"]}
+            seen: dict[str, set[str]] = {}
+            share: dict[str, int] = {}
+            items = [(b["rack_id"], it) for b in fac["bays"] if b["in_capacity"] for it in b["items"]]
+            for rack_id, it in items:
+                for cat in (age(it["age_days"]), turn(it["turnover_days"]), it["material_type"]):
+                    seen.setdefault(cat, set()).add(rack_id)
+                    share[cat] = share.get(cat, 0) + 1
+            for cat in ["d30", "d90", "d180", "d365", "d365p", "fast", "moderate", "slow", "ROH1", "ROH2", "ROH3"]:
+                self.assertIn(cat, seen, f"{key}: no {cat} pallets")
+                self.assertGreaterEqual(len(seen[cat]) / len(racks), 0.9, f"{key}: {cat} only in a few racks")
+                self.assertGreater(share[cat] / len(items), 0.03, f"{key}: {cat} too rare to filter")
+            self.assertGreater(share["slow"] / len(items), 0.2, "slow movers are a real share of the stock")
+
+    def test_dormant_parts_are_not_reordered(self) -> None:
+        dormant = [p["part_no"] for p in DATA["planning"]["parts"] if p.get("velocity") == "dormant"]
+        self.assertTrue(dormant)
+        for part in dormant:
+            self.assertEqual(sum(DATA["planning"]["oms"][part]), 0, part)
+
     def test_only_synthetic_identifiers(self) -> None:
         text = json.dumps(DATA)
         for part in DATA["planning"]["parts"]:
@@ -135,14 +170,26 @@ class BuildFromExportsTest(unittest.TestCase):
         plan = data["planning"]
         self.assertEqual(plan["weeks"][0]["start"], DATA["planning"]["weeks"][0]["start"])
         self.assertEqual([w["prod_days"] for w in plan["weeks"]], [w["prod_days"] for w in DATA["planning"]["weeks"]])
-        self.assertEqual(plan["oms"], DATA["planning"]["oms"])
+        self.assertEqual(plan["oms"], {k: v for k, v in DATA["planning"]["oms"].items() if any(v)})
         self.assertEqual({k: [int(v) for v in s] for k, s in plan["forecast"].items()}, DATA["planning"]["forecast"])
         self.assertEqual(plan["capacity_positions"], DATA["planning"]["capacity_positions"])
         self.assertEqual(data["report"]["pallets"], self.n_pallets)
         self.assertEqual(data["report"]["warnings"], [])
         self.assertAlmostEqual(data["report"]["occupancy_pct"], 68.6, places=1)
         held = sum(1 for f in data["facilities"].values() for b in f["bays"] for it in b["items"] if not it["simulated"])
-        self.assertGreater(held, 0, "sub-assembly / finished-goods pallets are held")
+        self.assertEqual(held, 0, "every pallet of the synthetic export is a purchased part")
+
+    def test_stock_without_part_master_is_held(self) -> None:
+        with (self.in_dir / "stock.csv").open("a", encoding="utf-8", newline="") as fh:
+            csv.writer(fh).writerow(["SVC-0001", 50, 1, "2025-06-01"])
+        data = bfe.build(self.in_dir, 16, None, 7)
+        rows = [it for f in data["facilities"].values() for b in f["bays"] for it in b["items"]
+                if it["part_no"] == "SVC-0001"]
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]["simulated"])
+        self.assertEqual(rows[0]["material_type"], "")
+        self.assertEqual(rows[0]["turnover_days"], bfe.NO_DEMAND_COVER)
+        self.assertGreater(rows[0]["age_days"], 365)
 
     def test_writes_bundles_and_manifest(self) -> None:
         with contextlib.redirect_stdout(io.StringIO()):

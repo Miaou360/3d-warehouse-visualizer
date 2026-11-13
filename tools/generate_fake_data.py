@@ -5,7 +5,9 @@ Everything here is generated from a fixed PRNG seed and reads zero external file
 
 * two facilities of 5-level pallet racks at a realistic plant scale (~3,800 pallet positions in total),
   a small floor staging area and a quality-hold rack per facility;
-* one pallet per rack position, 68.6 % of the rack positions occupied at the snapshot;
+* a material (raw-material) warehouse: every pallet is a purchased part of type ROH1, ROH2 or ROH3;
+* one pallet per rack position, 68.6 % of the rack positions occupied at the snapshot, with fast, moderate,
+  slow and dormant parts mixed over all racks (free location), so stock age runs from days to well over a year;
 * the planning data for the weekly space simulation (demo/sim_engine.js): part master with pallet
   quantities, a multi-level BOM, a weekly customer forecast per finished-goods model and the weekly
   inbound quantities of an order management system (OMS) for every purchased part.
@@ -51,7 +53,23 @@ SIZE_CLASSES = [
     ("small", 0.25, [1600, 2000, 2400, 3200, 4000, 4800], [2, 4, 4, 6, 8]),
 ]
 LAUNCH_PARTS = 12                              # the last purchased parts are new parts of the launch model
-OMS_COVER_FACTOR = 0.9                         # OMS cover target vs. the snapshot cover (partial pallets add space)
+OMS_COVER_FACTOR = 1.0                         # OMS cover target vs. the snapshot cover of fast / moderate parts
+
+# raw-material types of the material warehouse and their share of the purchased parts
+MATERIAL_TYPES = (("ROH1", 0.46), ("ROH2", 0.33), ("ROH3", 0.21))
+
+# Stock profile at the snapshot. As in most plants, a minority of high runners turns most of the pallets, while
+# many low runners sit on stock: the parts that use the fewest pallets per day are the slow and dormant ones.
+# (class, share of the rack pallets, cover range in days of the coming requirement, share of that cover the
+#  pallets' receipts are spread over - dormant parts were last received months ago)
+VELOCITY = (
+    ("dormant", 0.13, 190.0, 640.0, 0.45),
+    ("slow", 0.21, 42.0, 170.0, 0.6),
+    ("moderate", 0.36, 17.0, 36.0, 1.0),
+    ("fast", 0.30, 5.0, 14.0, 1.0),
+)
+SLOW_ORDER_COVER_WEEKS = 3.0                   # slow parts: reorder point ~3 weeks, then full pallets
+DORMANT_ORDER_COVER_WEEKS = 2.0                # planners do not reorder dormant parts within the horizon
 
 
 # ----------------------------------------------------------------------------------------------- calendar
@@ -76,8 +94,18 @@ def build_weeks(start: dt.date = SNAPSHOT_DATE, count: int = HORIZON_WEEKS) -> l
 
 
 # ----------------------------------------------------------------------------------------------- catalog / BOM
+def material_type_for(u: float) -> str:
+    """ROH1 / ROH2 / ROH3 from one uniform draw (MATERIAL_TYPES shares)."""
+    acc = 0.0
+    for name, share in MATERIAL_TYPES:
+        acc += share
+        if u < acc:
+            return name
+    return MATERIAL_TYPES[-1][0]
+
+
 def build_part_catalog(rng: random.Random, count: int = 200) -> list[dict[str, Any]]:
-    """Purchased parts (ROH1 / ROH2) with pallet quantity, supplier, delivery pattern and order policy."""
+    """Purchased parts (ROH1 / ROH2 / ROH3) with pallet quantity, supplier, delivery pattern and order policy."""
     suppliers = [{"code": f"SUP-{i:03d}", "name": f"Supplier {i:03d}"} for i in range(1, 25)]
     used: set[str] = set()
     parts = []
@@ -97,7 +125,7 @@ def build_part_catalog(rng: random.Random, count: int = 200) -> list[dict[str, A
         parts.append({
             "part_no": f"PART-{idx:04d}",
             "description": desc,
-            "material_type": "ROH1" if rng.random() < 0.62 else "ROH2",
+            "material_type": material_type_for(rng.random()),
             "supplier_code": sup["code"],
             "supplier_name": sup["name"],
             "size_class": size[0],
@@ -210,6 +238,8 @@ def build_oms(rng: random.Random, parts: list[dict[str, Any]], req: dict[str, li
         nonzero = [x for x in r if x > 0]
         avg = sum(nonzero) / len(nonzero) if nonzero else 0.0
         step = p["pallet_qty"] if rng.random() < 0.5 else max(1, p["pallet_qty"] // rng.choice([4, 6, 8]))
+        if p.get("velocity") in ("slow", "dormant"):    # low runners are bought in whole pallets
+            step = p["pallet_qty"]
         per = period[p["order_policy"]]
         offset = rng.randrange(per)
         first_use = next((i for i, x in enumerate(r) if x > 0), horizon)
@@ -242,9 +272,9 @@ def build_oms(rng: random.Random, parts: list[dict[str, Any]], req: dict[str, li
 def facility_specs() -> dict[str, dict[str, Any]]:
     """Rack lines per facility as (bays per line, levels); back-to-back pairs with forklift aisles between."""
     return {
-        "north": {"name": "Facility North", "subtitle": "Assembly Warehouse (Synthetic, 5-Level Racks)",
+        "north": {"name": "Facility North", "subtitle": "Material Warehouse (Synthetic, 5-Level Racks)",
                   "letter": "N", "lines": [(22, 5)] * 14 + [(20, 5)] * 2, "pair_pitch": 8.0, "bay_pitch": 2.4},
-        "south": {"name": "Facility South", "subtitle": "Component Warehouse (Synthetic, 5-Level Racks)",
+        "south": {"name": "Facility South", "subtitle": "Material Warehouse (Synthetic, 5-Level Racks)",
                   "letter": "S", "lines": [(24, 5)] * 13 + [(20, 5)] * 2 + [(24, 4)] * 3, "pair_pitch": 8.0,
                   "bay_pitch": 2.35},
     }
@@ -295,43 +325,72 @@ def pallets_for(qty: int, pallet_qty: int) -> list[int]:
     return [int(pallet_qty)] * full + ([rest] if rest else [])
 
 
+def daily_use(req: dict[str, list[float]], part_no: str) -> float:
+    """Average daily requirement of the first three weeks (pieces per calendar day)."""
+    r = req.get(part_no, [0.0])[:3]
+    return sum(r) / max(1, len(r)) / 7.0
+
+
 def build_start_stock(rng: random.Random, parts: list[dict[str, Any]], req: dict[str, list[float]],
-                      target_pallets: int) -> dict[str, Any]:
-    """Pieces on hand per purchased part at the snapshot: cover weeks of the coming requirement, scaled so the
-    pallets (full pallets + one partial pallet per part) fill exactly target_pallets rack positions. The key
-    '__scale__' returns the cover scale (the OMS plan keeps the same cover)."""
-    regular = [p for p in parts if not p.get("launch_part")]
+                      target_pallets: int) -> dict[str, dict[str, Any]]:
+    """Snapshot stock per purchased part: velocity class, pieces on hand and cover days.
 
-    def count(stock: dict[str, int]) -> int:
-        return sum(len(pallets_for(stock[p["part_no"]], p["pallet_qty"])) for p in regular if stock[p["part_no"]])
+    Parts are ranked by the pallets they use per day; the lowest runners fill the dormant and slow shares of the
+    pallets (VELOCITY), the rest are moderate and fast. Covers are drawn inside each class range and scaled
+    together so the pallets (full pallets + one partial pallet per part) fill exactly target_pallets positions;
+    the last few pallets are added to / taken from fast and moderate parts."""
+    regular = [p for p in parts if not p.get("launch_part") and daily_use(req, p["part_no"]) > 0]
+    use = {p["part_no"]: daily_use(req, p["part_no"]) for p in regular}
 
-    def build(scale: float) -> dict[str, int]:
-        out = {}
-        for p in regular:
-            r = req.get(p["part_no"], [0.0])[:3]
-            out[p["part_no"]] = int(round(sum(r) / max(1, len(r)) * p["cover_weeks"] * scale))
-        return out
+    def rate(p: dict[str, Any]) -> float:                        # pallets used per day
+        return use[p["part_no"]] / p["pallet_qty"]
 
-    lo, hi = 0.05, 8.0
+    ranked = sorted(regular, key=lambda p: (rate(p), p["part_no"]))
+    profile: dict[str, dict[str, Any]] = {}
+    i = 0
+    for k, (cls, share, lo, hi, spread) in enumerate(VELOCITY):
+        goal, got, last = share * target_pallets, 0.0, k == len(VELOCITY) - 1
+        while i < len(ranked) and (last or got < goal):
+            p = ranked[i]
+            i += 1
+            cover = lo * (hi / lo) ** rng.random() if hi / lo > 3 else rng.uniform(lo, hi)
+            profile[p["part_no"]] = {"class": cls, "cover": cover, "spread": spread}
+            got += rate(p) * cover + 0.5                         # + the partial pallet
+
+    def pieces(p: dict[str, Any], scale: float) -> int:
+        return int(round(use[p["part_no"]] * profile[p["part_no"]]["cover"] * scale))
+
+    def count(scale: float) -> int:
+        return sum(len(pallets_for(pieces(p, scale), p["pallet_qty"])) for p in regular if pieces(p, scale) > 0)
+
+    lo_s, hi_s = 0.2, 5.0
     for _ in range(60):
-        mid = (lo + hi) / 2
-        if count(build(mid)) < target_pallets:
-            lo = mid
+        mid = (lo_s + hi_s) / 2
+        if count(mid) < target_pallets:
+            lo_s = mid
         else:
-            hi = mid
-    stock = build(lo)
-    stock["__scale__"] = lo                                          # cover scale, reused by the OMS plan
+            hi_s = mid
+    stock = {p["part_no"]: pieces(p, lo_s) for p in regular}
+    n = count(lo_s)
+    movers = [p for p in regular if profile[p["part_no"]]["class"] in ("fast", "moderate")]
     guard = 0
-    scale = stock.pop("__scale__")
-    while count(stock) != target_pallets and guard < 20000:          # exact pallet count with whole pallets
+    while n != target_pallets and guard < 20000:                  # exact pallet count with whole pallets
         guard += 1
-        p = rng.choice(regular)
-        if count(stock) < target_pallets:
+        p = rng.choice(movers)
+        if n < target_pallets:
             stock[p["part_no"]] += p["pallet_qty"]
+            n += 1
         elif stock[p["part_no"]] > p["pallet_qty"]:
             stock[p["part_no"]] -= p["pallet_qty"]
-    stock["__scale__"] = scale
-    return stock
+            n -= 1
+    out = {}
+    for p in regular:
+        q = stock[p["part_no"]]
+        if q > 0:
+            prof = profile[p["part_no"]]
+            out[p["part_no"]] = {"class": prof["class"], "qty": q, "spread": prof["spread"],
+                                 "cover_days": q / use[p["part_no"]]}
+    return out
 
 
 # ----------------------------------------------------------------------------------------------- assemble
@@ -365,25 +424,27 @@ def build_all(base_seed: int = DEFAULT_SEED) -> dict[str, Any]:
     positions = {k: [(b, lvl) for b in bays if b["in_capacity"] for lvl in range(1, b["max_levels"] + 1)]
                  for k, bays in layouts.items()}
     occupied = {k: int(round(len(v) * START_OCCUPANCY)) for k, v in positions.items()}
-    static_n = {k: int(round(n * 0.05)) for k, n in occupied.items()}     # sub-assembly / FG pallets
-    sim_n = sum(occupied.values()) - sum(static_n.values())
-    start_stock = build_start_stock(rng, parts, req, sim_n)
-    cover_scale = start_stock.pop("__scale__")
-    oms = build_oms(rng, parts, req, weeks, start_stock, cover_scale)
+    sim_n = sum(occupied.values())                       # material warehouse: every rack pallet is a purchased part
+    srng = random.Random(base_seed + 7)                  # stock-profile draws, separate from the planning draws
+    stock = build_start_stock(srng, parts, req, sim_n)
+    order_cover = {"dormant": DORMANT_ORDER_COVER_WEEKS, "slow": SLOW_ORDER_COVER_WEEKS}
+    for p in parts:              # OMS cover target: fast / moderate keep their snapshot cover, low runners reorder late
+        s = stock.get(p["part_no"])
+        if s:
+            p["velocity"] = s["class"]
+            p["cover_weeks"] = order_cover.get(s["class"], round(s["cover_days"] / 7, 2))
+    oms = build_oms(rng, parts, req, weeks, {k: v["qty"] for k, v in stock.items()})
 
     sim_pallets: list[dict[str, Any]] = []
     for p in parts:
-        q = start_stock.get(p["part_no"], 0)
-        if not q:
+        s = stock.get(p["part_no"])
+        if not s:
             continue
-        pls = pallets_for(q, p["pallet_qty"])
-        weekly = max(1.0, sum(req.get(p["part_no"], [0.0])[:3]) / 3.0)
-        cover_days = max(2, int(round(q / weekly * 7)))
-        for i, qty in enumerate(pls):                                 # first pallet = oldest (FIFO)
-            age = int(round(cover_days * (1 - i / len(pls)))) + rng.randint(0, 3)
-            sim_pallets.append({"part": p, "qty": qty, "age": age, "turnover": float(cover_days)})
-    rng.shuffle(sim_pallets)                                          # free location: any position
-    statics = halbs + fgs
+        pls = pallets_for(s["qty"], p["pallet_qty"])
+        for i, qty in enumerate(pls):                                 # first pallet = oldest (FIFO); receipts
+            age = int(round(s["cover_days"] * (1 - s["spread"] * i / len(pls)))) + srng.randint(0, 3)
+            sim_pallets.append({"part": p, "qty": qty, "age": age, "turnover": s["cover_days"]})
+    rng.shuffle(sim_pallets)                                          # free location: any position, all racks
 
     datasets: dict[str, Any] = {}
     box_seq = 0
@@ -392,8 +453,7 @@ def build_all(base_seed: int = DEFAULT_SEED) -> dict[str, Any]:
         pos = list(positions[k])
         rng.shuffle(pos)
         chosen = pos[:occupied[k]]
-        n_static = static_n[k]
-        n_sim = occupied[k] - n_static
+        n_sim = occupied[k]
         items_by_bay: dict[str, list[dict[str, Any]]] = {}
 
         def add(bay_id: str, level: int, slot: int, rec: dict[str, Any], qty: int, age: int, turn: float) -> None:
@@ -410,15 +470,7 @@ def build_all(base_seed: int = DEFAULT_SEED) -> dict[str, Any]:
                     "material_type": p["material_type"], "supplier_code": p["supplier_code"],
                     "supplier_name": p["supplier_name"], "uom": p["uom"], "simulated": simulated}
 
-        for bay, lvl in chosen[:n_static]:
-            s = rng.choice(statics)
-            add(bay["bay_id"], lvl, 0, {"part_no": s["part_no"], "description": s["description"],
-                                         "model": s.get("model", "Model A"),
-                                         "material_type": "FERT" if s["part_no"].startswith("FG") else "HALB",
-                                         "supplier_code": "IN-HOUSE", "supplier_name": "In-House Production",
-                                         "uom": "EA", "simulated": False},
-                rng.choice([12, 16, 24, 32]), rng.randint(1, 45), round(rng.uniform(5, 30), 1))
-        for (bay, lvl), pl in zip(chosen[n_static:], sim_pallets[cursor:cursor + n_sim]):
+        for (bay, lvl), pl in zip(chosen, sim_pallets[cursor:cursor + n_sim]):
             add(bay["bay_id"], lvl, 0, part_rec(pl["part"], True), pl["qty"], pl["age"], pl["turnover"])
         cursor += n_sim
         for bay in layouts[k]:                    # staging: inbound pallets waiting for put-away
@@ -473,7 +525,9 @@ def build_all(base_seed: int = DEFAULT_SEED) -> dict[str, Any]:
             "outbound": "forecast exploded through the BOM; a pallet position frees only when its pallet is empty",
             "calendar": "Christmas week Mon-Wed, shutdown week between the holidays (no production, no deliveries)",
             "launch": f"{LAUNCH_MODEL} starts in week index {LAUNCH_WEEK_INDEX}; its new parts arrive 2 weeks earlier",
-            "static": "sub-assembly / finished-goods pallets and floor staging are held constant",
+            "stock": "material warehouse: purchased parts only (ROH1 / ROH2 / ROH3); fast, moderate, slow and "
+                     "dormant parts mixed over all racks; dormant parts are not reordered within the horizon",
+            "static": "floor staging pallets are held constant",
         },
     }
     return {"facilities": datasets, "planning": planning}
