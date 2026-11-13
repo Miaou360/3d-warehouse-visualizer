@@ -474,10 +474,13 @@
         camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.5, 350);
         camera.position.set(0, 58, 74);
 
-        renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        // light settings (same as the 3D map): pixel ratio capped at 1.5, MSAA on standard-density screens only,
+        // no shadow pass
+        const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+        renderer = new THREE.WebGLRenderer({ canvas, antialias: dpr < 1.5, powerPreference: "high-performance" });
+        renderer.setPixelRatio(dpr);
         renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.enabled = false;
 
         controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;

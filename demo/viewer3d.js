@@ -93,16 +93,17 @@
     camera = new THREE.PerspectiveCamera(45, aspect, 0.5, 600);
     camera.position.set(CAM_3D.x, CAM_3D.y, CAM_3D.z);
 
+    // Light by design (playable on office laptops): pixel ratio capped at 1.5, MSAA only on standard-density
+    // screens, no shadow pass, Lambert materials, and frames are drawn only when something changed (see animate)
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     renderer = new THREE.WebGLRenderer({
       canvas: canvasEl,
-      antialias: true,
+      antialias: dpr < 1.5,
       powerPreference: "high-performance",
-      preserveDrawingBuffer: true,
     });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(dpr);
     renderer.setSize(wrapper.clientWidth, wrapper.clientHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.enabled = false;
 
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -111,26 +112,20 @@
     controls.minDistance = 10;
     controls.maxDistance = 240;
     controls.target.set(TARGET_3D.x, TARGET_3D.y, TARGET_3D.z);
+    controls.addEventListener("change", requestRender);
 
     scene.add(new THREE.HemisphereLight(0xdbeafe, 0x0f172a, 0.85));
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 0.95);
     keyLight.position.set(46, 80, 40);
-    keyLight.castShadow = true;
-    keyLight.shadow.mapSize.width = 2048;
-    keyLight.shadow.mapSize.height = 2048;
-    keyLight.shadow.camera.left = -80;
-    keyLight.shadow.camera.right = 80;
-    keyLight.shadow.camera.top = 70;
-    keyLight.shadow.camera.bottom = -70;
     scene.add(keyLight);
 
     const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.35);
     rimLight.position.set(-55, 40, -45);
     scene.add(rimLight);
 
-    sharedMats.upright = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.65, roughness: 0.38 });
-    sharedMats.beam = new THREE.MeshStandardMaterial({ color: 0xd97706, metalness: 0.35, roughness: 0.45 });
+    sharedMats.upright = new THREE.MeshLambertMaterial({ color: 0x64748b });
+    sharedMats.beam = new THREE.MeshLambertMaterial({ color: 0xd97706 });
     sharedMats.stagingPad = new THREE.MeshBasicMaterial({
       color: 0xfbbf24,
       transparent: true,
@@ -138,7 +133,7 @@
       side: THREE.DoubleSide,
     });
     sharedMats.proxy = new THREE.MeshBasicMaterial({ visible: false });
-    sharedMats.pallet = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0.12 });
+    sharedMats.pallet = new THREE.MeshLambertMaterial({ color: 0xffffff });
 
     buildBaseFloor();
 
@@ -155,11 +150,10 @@
   function buildBaseFloor() {
     const floorMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(124, 112),
-      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.88, metalness: 0.12 })
+      new THREE.MeshBasicMaterial({ color: 0x0f172a })
     );
     floorMesh.rotation.x = -Math.PI / 2;
     floorMesh.position.y = -0.04;
-    floorMesh.receiveShadow = true;
     scene.add(floorMesh);
 
     const grid = new THREE.GridHelper(120, 60, 0x1e293b, 0x162033);
@@ -259,9 +253,6 @@
     const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.08, 1, 0.08), sharedMats.upright, Math.max(1, postCount));
     const beams = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.06, 0.06), sharedMats.beam, Math.max(1, beamCount));
     palletMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), sharedMats.pallet, Math.max(1, slotCount));
-    palletMesh.castShadow = true;
-    palletMesh.receiveShadow = true;
-    posts.castShadow = true;
 
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -352,6 +343,12 @@
       facilityRoot.add(sign);
     });
 
+    facilityRoot.traverse((o) => {
+      if (o === facilityRoot) return;
+      o.updateMatrix();
+      o.matrixAutoUpdate = false;
+    });
+    facilityRoot.updateMatrixWorld(true);
     paint();
   }
 
@@ -404,6 +401,7 @@
     });
     palletMesh.instanceMatrix.needsUpdate = true;
     if (palletMesh.instanceColor) palletMesh.instanceColor.needsUpdate = true;
+    requestRender();
   }
 
   function applyState(matchedBayIds, matchedItemSet, colorMode) {
@@ -441,9 +439,11 @@
     );
     selectionBoxMesh.position.set(entry.bay.world_x, (entry.proxyH + 0.25) / 2, entry.bay.world_z);
     facilityRoot.add(selectionBoxMesh);
+    selectionBoxMesh.updateMatrixWorld(true);
     if (cameraViewMode === "3d" && window.gsap) {
-      gsap.to(controls.target, { x: entry.bay.world_x, y: 2.0, z: entry.bay.world_z, duration: 0.65, ease: "power2.out" });
+      gsap.to(controls.target, { x: entry.bay.world_x, y: 2.0, z: entry.bay.world_z, duration: 0.65, ease: "power2.out", onUpdate: requestRender });
     }
+    requestRender();
     return entry.bay;
   }
 
@@ -452,6 +452,7 @@
       facilityRoot.remove(selectionBoxMesh);
       selectionBoxMesh = null;
     }
+    requestRender();
   }
 
   function setCameraMode(mode) {
@@ -459,9 +460,9 @@
     if (!window.gsap) return;
     const to = mode === "2d" ? CAM_2D : CAM_3D;
     controls.enableRotate = mode !== "2d";
-    gsap.to(camera.position, { x: to.x, y: to.y, z: to.z, duration: 0.9, ease: "power2.inOut", onUpdate: () => controls.update() });
+    gsap.to(camera.position, { x: to.x, y: to.y, z: to.z, duration: 0.9, ease: "power2.inOut", onUpdate: requestRender });
     const tg = mode === "2d" ? { x: 0, y: 0, z: 0 } : TARGET_3D;
-    gsap.to(controls.target, { x: tg.x, y: tg.y, z: tg.z, duration: 0.9, ease: "power2.inOut" });
+    gsap.to(controls.target, { x: tg.x, y: tg.y, z: tg.z, duration: 0.9, ease: "power2.inOut", onUpdate: requestRender });
   }
 
   function resetCamera() {
@@ -479,7 +480,23 @@
       pointerDownPos = { x: ev.clientX, y: ev.clientY };
     });
 
+    let hoverEv = null;
+    let hoverQueued = false;
     canvasEl.addEventListener("pointermove", (ev) => {
+      if (ev.buttons !== 0) {                 // orbiting / panning: no picking while the camera moves
+        if (tooltip) tooltip.classList.add("hidden");
+        return;
+      }
+      hoverEv = ev;
+      if (hoverQueued) return;
+      hoverQueued = true;
+      requestAnimationFrame(() => {
+        hoverQueued = false;
+        if (hoverEv) hover(hoverEv);
+      });
+    });
+
+    function hover(ev) {
       const rect = canvasEl.getBoundingClientRect();
       pointerNDC.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
       pointerNDC.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
@@ -508,9 +525,10 @@
         canvasEl.style.cursor = "grab";
         if (tooltip) tooltip.classList.add("hidden");
       }
-    });
+    }
 
     canvasEl.addEventListener("pointerleave", () => {
+      hoverEv = null;
       if (tooltip) tooltip.classList.add("hidden");
     });
 
@@ -536,15 +554,25 @@
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      requestRender();
     };
     window.addEventListener("resize", onResize);
     if (window.ResizeObserver) new ResizeObserver(onResize).observe(wrapper);
   }
 
+  // Frames are drawn only when something changed: camera moves (incl. damping), repaints, tweens, resize.
+  let needsRender = true;
+  function requestRender() {
+    needsRender = true;
+  }
+
   function animate() {
     requestAnimationFrame(animate);
-    if (controls) controls.update();
-    if (renderer && scene && camera) renderer.render(scene, camera);
+    const moving = controls ? controls.update() : false;
+    if ((moving || needsRender) && renderer && scene && camera) {
+      needsRender = false;
+      renderer.render(scene, camera);
+    }
   }
 
   window.DemoViewer = {

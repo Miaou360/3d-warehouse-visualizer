@@ -49,52 +49,53 @@
       </div>
     </header>
 
-    <!-- KPI Cards -->
+    <!-- KPI Cards (pallet units; they follow the 3D view: snapshot, or the selected week of the simulation) -->
     <section class="kpi-strip">
       <div class="kpi-card glass-panel">
-        <div class="kpi-badge kpi-sky"><i class="fa-solid fa-boxes-stacked"></i></div>
+        <div class="kpi-badge kpi-sky"><i class="fa-solid fa-warehouse"></i></div>
         <div class="kpi-meta">
-          <span class="kpi-title">Total Inventory</span>
-          <div class="kpi-number" id="kpi-total-qty">0</div>
-          <span class="kpi-sub" id="kpi-total-boxes">0 pallets</span>
+          <span class="kpi-title">Total Racks</span>
+          <div class="kpi-number" id="kpi-racks">0</div>
+          <span class="kpi-sub" id="kpi-racks-sub">rack lines</span>
         </div>
       </div>
 
       <div class="kpi-card glass-panel">
-        <div class="kpi-badge kpi-indigo"><i class="fa-solid fa-barcode"></i></div>
+        <div class="kpi-badge kpi-indigo"><i class="fa-solid fa-table-cells"></i></div>
         <div class="kpi-meta">
-          <span class="kpi-title">Active SKUs</span>
-          <div class="kpi-number" id="kpi-sku-count">0</div>
-          <span class="kpi-sub" id="kpi-model-count">0 product models</span>
+          <span class="kpi-title">Total Bins</span>
+          <div class="kpi-number" id="kpi-bins">0</div>
+          <span class="kpi-sub" id="kpi-bins-sub">pallet positions</span>
         </div>
       </div>
 
       <div class="kpi-card glass-panel">
-        <div class="kpi-badge kpi-emerald"><i class="fa-solid fa-warehouse"></i></div>
+        <div class="kpi-badge kpi-emerald"><i class="fa-solid fa-chart-pie"></i></div>
         <div class="kpi-meta">
-          <span class="kpi-title">Rack Occupancy (pallet positions)</span>
+          <span class="kpi-title">Occupancy</span>
           <div class="kpi-number" id="kpi-occupancy">0%</div>
           <div class="occ-bar-track">
             <div class="occ-bar-fill" id="kpi-occupancy-bar" style="width: 0%"></div>
           </div>
+          <span class="kpi-sub" id="kpi-occupancy-sub">snapshot</span>
         </div>
       </div>
 
       <div class="kpi-card glass-panel">
-        <div class="kpi-badge kpi-blue"><i class="fa-solid fa-truck-ramp-box"></i></div>
+        <div class="kpi-badge kpi-blue"><i class="fa-solid fa-pallet"></i></div>
         <div class="kpi-meta">
-          <span class="kpi-title">Active Suppliers</span>
-          <div class="kpi-number" id="kpi-supplier-count">0</div>
-          <span class="kpi-sub" id="kpi-avg-turnover">Avg turnover: -- d</span>
+          <span class="kpi-title">Bins in Use</span>
+          <div class="kpi-number" id="kpi-used">0</div>
+          <span class="kpi-sub" id="kpi-used-sub">occupied pallet positions</span>
         </div>
       </div>
 
       <div class="kpi-card glass-panel">
         <div class="kpi-badge kpi-amber"><i class="fa-solid fa-clock-rotate-left"></i></div>
         <div class="kpi-meta">
-          <span class="kpi-title">Aging &gt; 90 Days</span>
-          <div class="kpi-number" id="kpi-aging-boxes">0</div>
-          <span class="kpi-sub" id="kpi-aging-share">0.0% of pallets</span>
+          <span class="kpi-title">Avg. Stock Age</span>
+          <div class="kpi-number" id="kpi-age">0 d</div>
+          <span class="kpi-sub" id="kpi-age-sub">per pallet in use</span>
         </div>
       </div>
     </section>
@@ -317,10 +318,10 @@
           </select>
         </label>
         <div class="sim-legend">
-          <span><i class="sw sw-bar"></i>Week end</span>
+          <span title="Bar = occupancy at the end of the week; its colour = the week's status (mid-week peak)"><i class="sw sw-bar"></i>Week end</span>
           <span><i class="sw sw-peak"></i>Mid-week peak</span>
-          <span><b class="st-watch">&#9888;</b> Watch &ge; 85%</span>
-          <span><b class="st-crit">&#9940;</b> Critical &ge; 95%</span>
+          <span><i class="sw sw-watch"></i><b class="st-watch">&#9888;</b> Peak &ge; 85%</span>
+          <span><i class="sw sw-crit"></i><b class="st-crit">&#9940;</b> Peak &ge; 95% / overflow</span>
         </div>
       </div>
       <div class="sim-body">

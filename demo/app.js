@@ -186,16 +186,9 @@
     const matchedBayIds = new Set();
     const matchedItemIds = new Set();
 
-    let totalQty = 0;
-    let totalBoxes = 0;
-    let turnoverSum = 0;
     let critCount = 0;
     let warnCount = 0;
     let normCount = 0;
-
-    const skus = new Set();
-    const models = new Set();
-    const suppliers = new Set();
 
     ds.bays.forEach((bay) => {
       const items = bay.items || [];
@@ -224,12 +217,6 @@
         if (itemMatchesFilters(it, bay)) {
           bayHasMatch = true;
           matchedItemIds.add(it.box_id);
-          totalQty += it.qty;
-          totalBoxes += 1;
-          turnoverSum += it.turnover_days;
-          skus.add(it.part_no);
-          models.add(it.model);
-          suppliers.add(it.supplier_code);
         }
       });
 
@@ -238,28 +225,7 @@
       }
     });
 
-    // occupancy = occupied pallet positions / pallet positions of the storage racks in scope
-    const scopedBays = ds.bays.filter(
-      (b) => (state.zone === "ALL" || b.zone === state.zone) && b.in_capacity !== false
-    );
-    const positions = scopedBays.reduce((acc, b) => acc + (b.capacity_boxes || 0), 0);
-    const occupiedScoped = scopedBays.reduce((acc, b) => acc + (b.box_count || 0), 0);
-    const occPct = positions > 0 ? ((occupiedScoped / positions) * 100).toFixed(1) : "0.0";
-    const avgTurn = totalBoxes > 0 ? (turnoverSum / totalBoxes).toFixed(1) : "0.0";
-
-    const agingBoxesInScope = filterActive && state.ageTier !== "ALL" ? totalBoxes : critCount;
-    const agingShare = totalBoxes > 0 ? ((critCount / Math.max(1, critCount + warnCount + normCount)) * 100).toFixed(1) : "0.0";
-
-    document.getElementById("kpi-total-qty").textContent = totalQty.toLocaleString();
-    document.getElementById("kpi-total-boxes").textContent = `${totalBoxes.toLocaleString()} pallets`;
-    document.getElementById("kpi-sku-count").textContent = skus.size.toLocaleString();
-    document.getElementById("kpi-model-count").textContent = `${models.size} product models`;
-    document.getElementById("kpi-occupancy").textContent = `${occPct}%`;
-    document.getElementById("kpi-occupancy-bar").style.width = `${occPct}%`;
-    document.getElementById("kpi-supplier-count").textContent = suppliers.size.toLocaleString();
-    document.getElementById("kpi-avg-turnover").textContent = `Avg turnover: ${avgTurn} d`;
-    document.getElementById("kpi-aging-boxes").textContent = agingBoxesInScope.toLocaleString();
-    document.getElementById("kpi-aging-share").textContent = `${agingShare}% of scoped pallets`;
+    renderKpiCards();
 
     document.getElementById("count-age-critical").textContent = critCount.toLocaleString();
     document.getElementById("count-age-warning").textContent = warnCount.toLocaleString();
@@ -276,6 +242,63 @@
     if (state.selectedBay) {
       renderBayDrawer(state.selectedBay);
     }
+  }
+
+  /** Top cards in pallet units. Racks / bins = storage racks in the zone scope. In use / age = the 3D view:
+   *  snapshot pallets (matching the filters), or - with a week selected below - that week's projected pallets. */
+  function renderKpiCards() {
+    const ds = state.dataset;
+    if (!ds) return;
+    const scoped = ds.bays.filter((b) => b.in_capacity !== false && (state.zone === "ALL" || b.zone === state.zone));
+    const scopedIds = new Set(scoped.map((b) => b.bay_id));
+    const racks = new Set(scoped.map((b) => b.rack_id)).size;
+    const bins = scoped.reduce((acc, b) => acc + (b.capacity_boxes || 0), 0);
+    const levels = scoped.reduce((acc, b) => Math.max(acc, b.max_levels || 0), 0);
+
+    let used = 0;
+    let ageSum = 0;
+    let over90 = 0;
+    let note = "";
+    let occupiedAll = scoped.reduce((acc, b) => acc + (b.box_count || 0), 0); // for the free count under filters
+    const proj = window.DemoCapacity && window.DemoCapacity.projection ? window.DemoCapacity.projection(state.facilityKey) : null;
+    if (proj) {
+      proj.map.forEach((st, key) => {
+        if (!scopedIds.has(key.slice(0, key.indexOf(":")))) return;
+        used += 1;
+        ageSum += st.age;
+        if (st.age > 90) over90 += 1;
+      });
+      note = `${proj.label} projection`;
+      occupiedAll = used;
+    } else {
+      const filtered = isAnyFilterActive();
+      scoped.forEach((bay) => {
+        (bay.items || []).forEach((it) => {
+          if (filtered && !itemMatchesFilters(it, bay)) return;
+          used += 1;
+          ageSum += it.age_days;
+          if (it.age_days > 90) over90 += 1;
+        });
+      });
+      note = filtered ? "matching the filters" : "snapshot";
+    }
+    const occ = bins > 0 ? (used / bins) * 100 : 0;
+    const fmt = (n) => n.toLocaleString();
+    document.getElementById("kpi-racks").textContent = fmt(racks);
+    document.getElementById("kpi-racks-sub").textContent = `rack lines · ${fmt(scoped.length)} bays`;
+    document.getElementById("kpi-bins").textContent = fmt(bins);
+    document.getElementById("kpi-bins-sub").textContent = `pallet positions · up to ${levels} levels`;
+    document.getElementById("kpi-occupancy").textContent = `${occ.toFixed(1)}%`;
+    const bar = document.getElementById("kpi-occupancy-bar");
+    bar.style.width = `${Math.min(100, occ)}%`;
+    bar.classList.toggle("watch", occ >= 85 && occ < 95);     // same thresholds as the weekly simulation
+    bar.classList.toggle("critical", occ >= 95);
+    document.getElementById("kpi-occupancy-sub").textContent =
+      occ >= 95 ? `⛔ critical · ${note}` : occ >= 85 ? `⚠ watch · ${note}` : note;
+    document.getElementById("kpi-used").textContent = fmt(used);
+    document.getElementById("kpi-used-sub").textContent = `${note} · ${fmt(Math.max(0, bins - occupiedAll))} free`;
+    document.getElementById("kpi-age").textContent = `${used ? Math.round(ageSum / used) : 0} d`;
+    document.getElementById("kpi-age-sub").textContent = `per pallet in use · ${fmt(over90)} over 90 d`;
   }
 
   function renderLegend() {
@@ -544,7 +567,10 @@
     },
     getState: () => state,
     renderLegend: () => renderLegend(),
-    onWeekSelected: () => renderLegend(),
+    onWeekSelected: () => {
+      renderLegend();
+      renderKpiCards();
+    },
   };
 
   window.addEventListener("DOMContentLoaded", () => {

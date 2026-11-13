@@ -19,6 +19,8 @@ An interactive WebGL digital-twin prototype for exploring rack-level warehouse i
 - **Interactive 3D & 2D Warehouse Map (`demo/index.html`)**
   - Multi-level high-bay steel racks, floor staging lanes, and special inspection zones rendered with **Three.js (`r128`)**.
   - Smooth **GSAP** camera transitions between **3D Orbit** and **2D Top-Down** views.
+  - **Pallet-unit KPI cards**: total racks (rack lines), total bins (pallet positions), occupancy, bins in use, and average stock age. They follow the 3D view — the snapshot (with the filters applied) or the projected week selected in the simulation dock.
+  - **Light by design**: racks, beams, and pallets are three instanced meshes; frames are drawn only when something changes (camera, repaint, resize), with no shadow pass, Lambert materials, and the pixel ratio capped at 1.5 — playable on an office laptop.
   - **Four Real-Time Heatmap Modes**:
     - **Occupancy**: Highlights high-density (`>= 85%`), balanced (`50-84%`), and open (`< 50%`) bays.
     - **Stock Aging**: Flags critical (`> 90 days`), warning (`31-90 days`), and normal (`<= 30 days`) inventory tiers.
@@ -32,7 +34,7 @@ An interactive WebGL digital-twin prototype for exploring rack-level warehouse i
   - **Inbound** = the weekly order quantity per part from an order management system (OMS) ÷ pallet quantity, **rounded up** (full pallets + one partial pallet), spread over the part's delivery days.
   - **Outbound** = the weekly customer forecast per finished good, exploded through a **multi-level BOM** into child-part requirements and consumed evenly over the production days, **first-in first-out**. A pallet position frees only when its pallet is empty — a partial pallet still takes the whole position.
   - **Whole warehouse, free location**: all rack positions form one pool; new pallets take any free position.
-  - **Mid-week peak**: deliveries land before production frees space, so every week shows its week-end occupancy (bar) **and** its highest daily occupancy (tick), with `⚠ Watch ≥ 85 %`, `⛔ Critical ≥ 95 %`, and overflow (pallets without a position) flagged.
+  - **Mid-week peak**: deliveries land before production frees space, so every week shows its week-end occupancy (bar) **and** its highest daily occupancy (tick). The bar itself turns **orange** when the week's peak reaches `85 %` (`⚠ watch`) and **red** at `95 %` or when pallets overflow the racks (`⛔ critical / overflow`), so risky weeks stand out at a glance.
   - **Click a week** to project its end-of-week stock into the 3D racks: pallets still from the snapshot, received in earlier weeks, received in that week, and held sub-assembly / finished-goods pallets. **Play** steps through the weeks.
   - **What-if controls**: customer forecast 70–130 %, deliveries one week early / late, arrivals spread vs. all on Monday, Mon–Sat production, temporary extra floor positions. KPIs (now, worst mid-week peak, first week ≥ 85 %, max overflow), hover tooltips, a table view, and a per-week detail panel (fastest-growing parts, parts that would run short).
   - The synthetic plan includes a short Christmas week, a shutdown week with a holiday build-ahead, and a new model launch, so the demo shows a critical peak in `W52` and watch weeks before the launch.

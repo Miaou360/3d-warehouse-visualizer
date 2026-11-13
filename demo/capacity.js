@@ -9,7 +9,7 @@
   const SVGNS = "http://www.w3.org/2000/svg";
   const DAY_NAMES = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const STATUS = {
-    watch: { color: "#fab219", icon: "⚠", label: "Watch" },
+    watch: { color: "#ec835a", icon: "⚠", label: "Watch" },
     critical: { color: "#d03b3b", icon: "⛔", label: "Critical" },
     overflow: { color: "#d03b3b", icon: "⛔", label: "Overflow" },
   };
@@ -69,7 +69,8 @@
       if (pid < 0) return;
       const pl = r.pallets[pid];
       const status = !pl.sim ? "fixed" : pl.initial ? "kept" : pl.arrival >= weekStart ? "week" : "arrived";
-      map.set(pos.key, { status, part: pl.part });
+      // age in days at the end of the week (initial pallets arrived -age_days before the snapshot)
+      map.set(pos.key, { status, part: pl.part, age: weekStart + 7 - pl.arrival });
     });
     return map;
   }
@@ -165,7 +166,7 @@
       const rr = Math.min(4, h);
       const d = `M${x - barW / 2},${base} L${x - barW / 2},${top + rr} Q${x - barW / 2},${top} ${x - barW / 2 + rr},${top}`
         + ` L${x + barW / 2 - rr},${top} Q${x + barW / 2},${top} ${x + barW / 2},${top + rr} L${x + barW / 2},${base} Z`;
-      g.appendChild(el("path", { d, class: c.now ? "sim-bar now" : "sim-bar" }));
+      g.appendChild(el("path", { d, class: c.now ? "sim-bar now" : `sim-bar${STATUS[c.risk] ? ` ${c.risk}` : ""}` }));
       if (!c.now && c.peakPct > c.endPct + 0.05) {
         g.appendChild(el("line", { x1: x - barW / 2 - 6, x2: x + barW / 2 + 6, y1: y(c.peakPct), y2: y(c.peakPct), class: "sim-peak" }));
       }
@@ -487,6 +488,11 @@
       select(-1, true);
     },
     refreshView: applyToViewer,
+    /** Selected week's projected pallets of one facility for the top cards, or null when the snapshot is shown. */
+    projection(facilityKey) {
+      if (!state.result || state.selected < 0) return null;
+      return { label: state.result.weeks[state.selected].label, map: positionStates(state.selected, facilityKey) };
+    },
     getResult: () => state.result,
     run,
   };

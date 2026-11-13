@@ -316,6 +316,14 @@ body {
   transition: width 0.35s ease;
 }
 
+.occ-bar-fill.watch {
+  background: #ec835a;
+}
+
+.occ-bar-fill.critical {
+  background: #d03b3b;
+}
+
 /* Main Workspace */
 .workspace-row {
   display: flex;
@@ -1058,8 +1066,18 @@ body {
   background: var(--text-primary);
 }
 
+.sim-legend .sw-watch {
+  background: #ec835a;
+  border-radius: 2px;
+}
+
+.sim-legend .sw-crit {
+  background: #d03b3b;
+  border-radius: 2px;
+}
+
 .st-watch {
-  color: #fab219;
+  color: #ec835a;
 }
 
 .st-crit {
@@ -1134,7 +1152,7 @@ body {
 }
 
 .sim-th-warn {
-  stroke: #fab219;
+  stroke: #ec835a;
   stroke-width: 1;
   stroke-dasharray: 4 4;
   opacity: 0.75;
@@ -1158,6 +1176,16 @@ body {
 
 .sim-bar.now {
   fill: rgba(148, 163, 184, 0.55);
+}
+
+/* the week's status colours the whole bar (icon + label stay above it and in the legend / tooltip / table) */
+.sim-bar.watch {
+  fill: #ec835a;
+}
+
+.sim-bar.critical,
+.sim-bar.overflow {
+  fill: #d03b3b;
 }
 
 .sim-peak {
@@ -1302,7 +1330,7 @@ body {
 }
 
 .sim-chip.watch {
-  color: #fab219;
+  color: #ec835a;
 }
 
 .sim-chip.critical,
